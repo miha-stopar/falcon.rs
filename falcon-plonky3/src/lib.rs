@@ -1,13 +1,16 @@
 //! Falcon signature verification expressed as a [Plonky3](https://github.com/Plonky3/Plonky3) STARK AIR.
 //!
-//! Current scope (branch `plonky3-port`):
-//! - Preprocessed trace: `pk_ntt`, `hm_ntt` per coefficient (for future binding to public inputs).
-//! - Main trace: dual NTT limbs for `sig` and `v`, plus `lhs_mod` / `rhs_mod` witnessing the
-//!   per-index congruence from the `falcon-r1cs` `FalconDualNTTVerificationCircuit`:
-//!   `(hm + v_neg + sig_neg * pk) ≡ (v_pos + sig_pos * pk) (mod MODULUS)` after full integer sums.
-//! - The AIR only checks `lhs_mod == rhs_mod`. It does **not** yet prove that those columns are
-//!   derived from `sig`, `pk`, `hm`, `v`, prove coefficient-domain `pos * neg = 0`, NTT layers,
-//!   or the L2 / range machinery from the full R1CS circuit.
+//! See **[`README.md`](./README.md)** for a column diagram and field-size discussion.
+//!
+//! The [`FalconDualNttEquationAir`] enforces, per NTT index:
+//! - `prod_sig_pos_pk = sig_pos_ntt * pk_ntt` and `prod_sig_neg_pk = sig_neg_ntt * pk_ntt` in KoalaBear
+//!   (sound because true products are \< \(q^2\) and below the KoalaBear prime),
+//! - `hm + v_neg + prod_sig_neg_pk = lhs_mod + quot_l * MODULUS` and the symmetric right side,
+//!   with `quot_l`, `quot_r` given as **14-bit** bit-decompositions,
+//! - `lhs_mod == rhs_mod`.
+//!
+//! Still **not** proved: NTT consistency for `sig`/`v`, coefficient-domain dual feasibility
+//! (`pos * neg = 0`), or Falcon norm / range bounds (see `falcon-r1cs` / `falcon-plonk`).
 
 pub mod air;
 pub mod config;

@@ -1,16 +1,24 @@
-//! AIR for the per-index dual-NTT verification equation from `falcon-r1cs` (see
-//! `FalconDualNTTVerificationCircuit`), without full `mod_q` reduction or NTT
-//! wiring inside the trace.
+//! AIR for the per-index dual-NTT verification equation (see `falcon-r1cs`
+//! `FalconDualNTTVerificationCircuit`).
+//!
+//! Enforces mod-`q` congruence via products in KoalaBear (safe below \(q^2\)) and
+//! explicit division with 14-bit quotient witnesses.
 
 use core::borrow::Borrow;
 
-use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_air::{Air, AirBuilder, BaseAir, FilteredAirBuilder, WindowAccess};
+use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_matrix::Matrix;
 
+use falcon_rust::MODULUS;
+
+/// Bits for quotient witnesses: max quotient is below \(q\) (see README).
+pub const QUOT_BITS: usize = 14;
+
 pub const NUM_PREPROCESSED_COLS: usize = 2;
-pub const NUM_MAIN_COLS: usize = 6;
+pub const NUM_MAIN_COLS: usize = 8 + 2 * QUOT_BITS;
 
 #[repr(C)]
 pub struct PreprocessedRow<F> {
@@ -24,10 +32,12 @@ pub struct MainRow<F> {
     pub sig_neg_ntt: F,
     pub v_pos_ntt: F,
     pub v_neg_ntt: F,
-    /// `(hm + v_neg + sig_neg * pk) mod MODULUS` at this NTT index (full integer sum then reduce).
     pub lhs_mod: F,
-    /// `(v_pos + sig_pos * pk) mod MODULUS`.
     pub rhs_mod: F,
+    pub prod_sig_pos_pk: F,
+    pub prod_sig_neg_pk: F,
+    pub quot_l_bits: [F; QUOT_BITS],
+    pub quot_r_bits: [F; QUOT_BITS],
 }
 
 impl<F> Borrow<PreprocessedRow<F>> for [F] {
@@ -91,28 +101,66 @@ impl BaseAir<KoalaBear> for FalconDualNttEquationAir {
     }
 
     fn max_constraint_degree(&self) -> Option<usize> {
-        // Linear relation in trace variables (no native field × for Falcon's mod-q product).
-        Some(2)
+        // Boolean checks (degree 2) and products like quot·q, sig·pk (degree 2).
+        Some(3)
     }
+}
+
+fn eval_row_constraints<AB: AirBuilder<F = KoalaBear>>(b: &mut FilteredAirBuilder<'_, AB>) {
+    let prep_win = b.preprocessed();
+    let prep: &PreprocessedRow<AB::Var> = prep_win.current_slice().borrow();
+    let main_win = b.main();
+    let m: &MainRow<AB::Var> = main_win.current_slice().borrow();
+
+    let pk = prep.pk_ntt;
+    let hm = prep.hm_ntt;
+    let sig_p = m.sig_pos_ntt;
+    let sig_n = m.sig_neg_ntt;
+    let v_p = m.v_pos_ntt;
+    let v_n = m.v_neg_ntt;
+    let lhs = m.lhs_mod;
+    let rhs = m.rhs_mod;
+    let prod_sp = m.prod_sig_pos_pk;
+    let prod_sn = m.prod_sig_neg_pk;
+
+    for bit in m.quot_l_bits.iter().copied() {
+        b.assert_bool(bit);
+    }
+    for bit in m.quot_r_bits.iter().copied() {
+        b.assert_bool(bit);
+    }
+
+    // Integer products stay < q^2 < 2^31 < p_KoalaBear; field × matches ℤ.
+    b.assert_eq(prod_sp, sig_p * pk);
+    b.assert_eq(prod_sn, sig_n * pk);
+
+    let sum_l = hm + v_n + prod_sn;
+    let sum_r = v_p + prod_sp;
+
+    let q_embed = KoalaBear::from_u32(u32::from(MODULUS));
+
+    let mut quot_l: AB::Expr = KoalaBear::ZERO.into();
+    for i in 0..QUOT_BITS {
+        let coeff = KoalaBear::from_u32(1u32 << i);
+        quot_l = quot_l + m.quot_l_bits[i].into() * coeff;
+    }
+    let mut quot_r: AB::Expr = KoalaBear::ZERO.into();
+    for i in 0..QUOT_BITS {
+        let coeff = KoalaBear::from_u32(1u32 << i);
+        quot_r = quot_r + m.quot_r_bits[i].into() * coeff;
+    }
+
+    b.assert_zero(sum_l - lhs - quot_l * q_embed);
+    b.assert_zero(sum_r - rhs - quot_r * q_embed);
+    b.assert_eq(lhs, rhs);
 }
 
 impl<AB: AirBuilder<F = KoalaBear>> Air<AB> for FalconDualNttEquationAir {
     fn eval(&self, builder: &mut AB) {
-        let main = builder.main();
-        let prep = builder.preprocessed().current_slice();
-        debug_assert_eq!(prep.len(), NUM_PREPROCESSED_COLS);
-        let main_local: &MainRow<AB::Var> = main.current_slice().borrow();
-
-        let lhs = main_local.lhs_mod;
-        let rhs = main_local.rhs_mod;
-
-        // Matches `mod_q(hm + v_neg + sig_neg * pk) == mod_q(v_pos + sig_pos * pk)` from the
-        // R1CS circuit, with both sides fully reduced mod `MODULUS` in the witness.
-
         let mut t = builder.when_transition();
-        t.assert_eq(lhs, rhs);
+        eval_row_constraints(&mut t);
 
         let mut last = builder.when_last_row();
-        last.assert_eq(lhs, rhs);
+        eval_row_constraints(&mut last);
     }
 }

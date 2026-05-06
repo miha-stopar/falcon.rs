@@ -1,0 +1,28 @@
+[package]
+name = "falcon-plonky3"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Falcon verification as a Plonky3 STARK AIR (work in progress)"
+
+[dependencies]
+falcon-rust = { path = "../falcon-rust", default-features = false }
+
+p3-air = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-challenger = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-commit = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-dft = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-field = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-fri = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-koala-bear = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-matrix = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-merkle-tree = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-poseidon2 = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-symmetric = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-uni-stark = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-util = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+
+[features]
+default = ["falcon-1024"]
+falcon-512 = ["falcon-rust/falcon-512"]
+falcon-1024 = ["falcon-rust/falcon-1024"]

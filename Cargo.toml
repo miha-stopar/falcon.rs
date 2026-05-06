@@ -4,5 +4,7 @@ members = [
     "falcon-aggregate-sig",
     "falcon-r1cs",
     "falcon-plonk",
+    "falcon-plonky3",
     "falcon-rust",
 ]
+resolver = "2"

@@ -113,15 +113,15 @@ Features (e.g. falcon-512 vs falcon-1024):
 
 ## 4. Lattice-based signatures (Falcon & ML-DSA / Dilithium)
 
-**Summary.** Both families verify over **structured lattices** in \(\mathbb{Z}_q[x]/(x^n+1)\) (or module structures for ML-DSA) with **small-norm** secrets and rejection sampling or decomposition tricks. NIST standards: **FIPS 206 (FN-DSA / Falcon)** and **FIPS 204 (ML-DSA / Dilithium)**.
+**Summary.** Both families verify over **structured lattices** in $\mathbb{Z}_q[x]/(x^n+1)$ (or module structures for ML-DSA) with **small-norm** secrets and rejection sampling or decomposition tricks. NIST standards: **FIPS 206 (FN-DSA / Falcon)** and **FIPS 204 (ML-DSA / Dilithium)**.
 
 ### 4.1 Common ZK / SNARK pain points (lattices)
 
 | Issue | Falcon (FN-DSA) | ML-DSA (Dilithium) |
 |-------|------------------|---------------------|
-| **Arithmetic base** | Odd modulus \(q\) (e.g. 12289); NTT-friendly | Different \(q\), module rank; more linear algebra |
-| **Norm / range checks** | \(\ell_2\) / coefficient bounds, dual representations | \(\ell_\infty\) bounds, hints / hints verification |
-| **Embedding field** | SNARK field \(\neq \mathbb{Z}_q\); need gadgets or limbs | Same class of problem; often more constraints |
+| **Arithmetic base** | Odd modulus $q$ (e.g. 12289); NTT-friendly | Different $q$, module rank; more linear algebra |
+| **Norm / range checks** | $\ell_2$ / coefficient bounds, dual representations | $\ell_\infty$ bounds, hints / hints verification |
+| **Embedding field** | SNARK field $\neq \mathbb{Z}_q$; need gadgets or limbs | Same class of problem; often more constraints |
 | **PQ proof stack** | Prefer **transparent** PCS; avoid pairing-only backends for PQ story | Same |
 
 ### 4.2 Falcon (FN-DSA-512) — current work
@@ -132,7 +132,7 @@ Features (e.g. falcon-512 vs falcon-1024):
 **Status (short).**
 
 - Existing **R1CS** (Arkworks) and **Plonk** (Jellyfish) circuits for verification; **Groth16** example uses pairing field (not PQ for the SNARK layer).
-- **Plonky3** branch: STARK-style AIR scaffolding; per-NTT-index equation with product + mod-\(q\) division witnesses; **not yet** full parity with R1CS (NTT wiring, full norm bounds, dual feasibility in coefficient domain — see crate `falcon-plonky3` README on that branch).
+- **Plonky3** branch: STARK-style AIR scaffolding; per-NTT-index equation with product + mod-$q$ division witnesses; **not yet** full parity with R1CS (NTT wiring, full norm bounds, dual feasibility in coefficient domain — see crate `falcon-plonky3` README on that branch).
 
 **Roadmap (lattice track).**
 
@@ -145,7 +145,7 @@ Features (e.g. falcon-512 vs falcon-1024):
 **Goals (placeholders).**
 
 - [ ] Choose parameter set (e.g. ML-DSA-44) and reference implementation.
-- [ ] Decompose verification: matrix–vector ops mod \(q\), decomposition of \(t\), hint checks, norm bounds.
+- [ ] Decompose verification: matrix–vector ops mod $q$, decomposition of $t$, hint checks, norm bounds.
 - [ ] Estimate R1CS / AIR size vs Falcon at similar classical security narrative.
 - [ ] Same PQ SNARK matrix as hash-based section (Plonky3, Spartan+WHIR, …).
 

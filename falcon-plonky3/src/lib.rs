@@ -4,7 +4,7 @@
 //!
 //! The [`FalconDualNttEquationAir`] enforces, per NTT index:
 //! - `prod_sig_pos_pk = sig_pos_ntt * pk_ntt` and `prod_sig_neg_pk = sig_neg_ntt * pk_ntt` in KoalaBear
-//!   (sound because true products are \< \(q^2\) and below the KoalaBear prime),
+//!   (sound because true products are $< q^2$ and below the KoalaBear prime),
 //! - `hm + v_neg + prod_sig_neg_pk = lhs_mod + quot_l * MODULUS` and the symmetric right side,
 //!   with `quot_l`, `quot_r` given as **14-bit** bit-decompositions,
 //! - `lhs_mod == rhs_mod`.

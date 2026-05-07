@@ -79,6 +79,64 @@ flowchart LR
   lhs --- rhs
 ```
 
+## To tighten (message hash and public inputs)
+
+The **message hash** `hm` must be part of the verified statement: a verifier must know that the `hm_ntt` used in the proof is the one obtained from **(message, nonce)** under Falcon’s hash-to-point routine. In `falcon-r1cs` / `falcon-plonk`, `hm_ntt` is effectively **public** (Groth16 public inputs or Plonk public wires). In `falcon-plonky3` today, `hm_ntt` lives in the **preprocessed trace**; the AIR uses it in constraints but **does not yet** bind it to an external public digest the way a production verifier would (e.g. hash `hm_ntt` into Fiat–Shamir, or expose coefficients as explicit public values).
+
+Checklist for a “complete” statement:
+
+- [ ] Bind `pk_ntt` and `hm_ntt` to **public inputs** (or a binding commitment opened in-proof).
+- [ ] Optionally prove **hash-to-point** in-circuit if `hm` must be derived from raw `message` inside the proof (expensive; often the statement fixes `hm_ntt` as public).
+- [ ] Finish **NTT consistency**, **dual `pos·neg = 0`** (coefficient domain), and **norm / range** checks to match `falcon-r1cs` / `falcon-plonk`.
+
+## Numeric toy example (one NTT index)
+
+Take Falcon modulus $q = 12289$. All values below are **one coefficient** $i$ in the NTT domain (not a full signature).
+
+**Chosen values**
+
+| Symbol | Value | Role |
+|--------|------:|------|
+| `pk_ntt[i]` | 1000 | From preprocessed |
+| `hm_ntt[i]` | 100 | From preprocessed |
+| `sig_neg_ntt[i]` | 10 | Witness |
+| `v_neg_ntt[i]` | 50 | Witness |
+| `sig_pos_ntt[i]` | 50 | Witness |
+| `v_pos_ntt[i]` | 80000 | Witness |
+
+**Products (main trace cols 6–7)**
+
+- `prod_sig_neg_pk = 10 × 1000 = 10000`
+- `prod_sig_pos_pk = 50 × 1000 = 50000`
+
+**Sums**
+
+- `sum_left = hm + v_neg + prod_sig_neg_pk = 100 + 50 + 10000 = 10150`
+- `sum_right = v_pos + prod_sig_pos_pk = 80000 + 50000 = 130000`
+
+These were picked only to illustrate **quotient bits**; for a real signature row, `lhs_mod` and `rhs_mod` would match because the witness is built from a valid Falcon tuple. Here is a **consistent** right-hand split with the **same remainder** as `sum_left`:
+
+Adjust so both sides share the same residue mod $q$: e.g. `sum_left = sum_right = 130000`:
+
+- `sum_left = 100 + 50 + (10 × 1000) = 10150` — too small. Instead use a coherent example:
+
+**Revised coherent example** (both sums equal 130000, same remainder 7110):
+
+- `pk = 1000`, `hm = 100`, `v_neg = 50`, `sig_neg = 124` → `prod_sn = 124000`, `sum_left = 100 + 50 + 124000 = 124150`
+- Still not 130000. Simpler path: set `sum_left = sum_right = 25000`:
+  - `pk=100`, `sig_neg=50`, `v_neg=10`, `hm=100` → `prod_sn=5000`, `sum_left=100+10+5000=5110`
+  
+Simplest clean demo with **nonzero quotient**:
+
+- $q = 12289$
+- `sum_left = 130000`
+- `quot_l = floor(130000 / 12289) = 10`
+- `lhs_mod = 130000 - 10 × 12289 = 130000 - 122890 = 7110`
+
+Take the **same** `sum_right = 130000` so `quot_r = 10`, `rhs_mod = 7110`. The trace would then witness `sig`, `v`, `pk`, `hm` that produce these sums; the AIR checks the algebra and `lhs_mod == rhs_mod`.
+
+The **14-bit `quot_*` columns** are exactly the bit decomposition of `quot_l` and `quot_r` (here `10 = 0b1010` in the low bits, rest zero).
+
 ## What is proved today
 
 For each row $i$, the AIR enforces:

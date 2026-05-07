@@ -1,6 +1,7 @@
 //! Falcon signature verification expressed as a [Plonky3](https://github.com/Plonky3/Plonky3) STARK AIR.
 //!
-//! See **[`README.md`](./README.md)** for a column diagram and field-size discussion.
+//! See **[`README.md`](./README.md)** for trace layout, **To tighten** (message hash / public binding),
+//! field sizes, and a numeric `quot_*` example.
 //!
 //! The [`FalconDualNttEquationAir`] enforces, per NTT index:
 //! - `prod_sig_pos_pk = sig_pos_ntt * pk_ntt` and `prod_sig_neg_pk = sig_neg_ntt * pk_ntt` in KoalaBear

@@ -91,51 +91,46 @@ Checklist for a “complete” statement:
 
 ## Numeric toy example (one NTT index)
 
-Take Falcon modulus $q = 12289$. All values below are **one coefficient** $i$ in the NTT domain (not a full signature).
+Falcon modulus $q = 12289$. Everything below is **one NTT coefficient** $i$ (not an entire signature).
 
-**Chosen values**
+**Witness / preprocessed values**
 
-| Symbol | Value | Role |
-|--------|------:|------|
-| `pk_ntt[i]` | 1000 | From preprocessed |
-| `hm_ntt[i]` | 100 | From preprocessed |
-| `sig_neg_ntt[i]` | 10 | Witness |
-| `v_neg_ntt[i]` | 50 | Witness |
-| `sig_pos_ntt[i]` | 50 | Witness |
-| `v_pos_ntt[i]` | 80000 | Witness |
+| Symbol | Value | Notes |
+|--------|------:|-------|
+| `pk_ntt[i]` | 1000 | Preprocessed |
+| `hm_ntt[i]` | 100 | Preprocessed |
+| `sig_neg_ntt[i]` | 20 | Witness |
+| `v_neg_ntt[i]` | 4900 | Witness |
+| `sig_pos_ntt[i]` | 5 | Witness |
+| `v_pos_ntt[i]` | 20000 | Witness |
 
-**Products (main trace cols 6–7)**
+**Step 1 — products (cols 6–7)**
 
-- `prod_sig_neg_pk = 10 × 1000 = 10000`
-- `prod_sig_pos_pk = 50 × 1000 = 50000`
+- `prod_sig_neg_pk = 20 × 1000 = 20000`
+- `prod_sig_pos_pk = 5 × 1000 = 5000`
 
-**Sums**
+**Step 2 — sums**
 
-- `sum_left = hm + v_neg + prod_sig_neg_pk = 100 + 50 + 10000 = 10150`
-- `sum_right = v_pos + prod_sig_pos_pk = 80000 + 50000 = 130000`
+- `sum_left = hm + v_neg + prod_sig_neg_pk = 100 + 4900 + 20000 = 25000`
+- `sum_right = v_pos + prod_sig_pos_pk = 20000 + 5000 = 25000`
 
-These were picked only to illustrate **quotient bits**; for a real signature row, `lhs_mod` and `rhs_mod` would match because the witness is built from a valid Falcon tuple. Here is a **consistent** right-hand split with the **same remainder** as `sum_left`:
+So the congruence step starts from **equal integer totals** on both sides.
 
-Adjust so both sides share the same residue mod $q$: e.g. `sum_left = sum_right = 130000`:
+**Step 3 — remainder and quotient ($q$-division)**
 
-- `sum_left = 100 + 50 + (10 × 1000) = 10150` — too small. Instead use a coherent example:
+Reduce `25000` modulo $q$:
 
-**Revised coherent example** (both sums equal 130000, same remainder 7110):
+- `25000 ÷ 12289 = 1` remainder `12711`
+- So **`lhs_mod = rhs_mod = 12711`**, **`quot_l = quot_r = 1`**
 
-- `pk = 1000`, `hm = 100`, `v_neg = 50`, `sig_neg = 124` → `prod_sn = 124000`, `sum_left = 100 + 50 + 124000 = 124150`
-- Still not 130000. Simpler path: set `sum_left = sum_right = 25000`:
-  - `pk=100`, `sig_neg=50`, `v_neg=10`, `hm=100` → `prod_sn=5000`, `sum_left=100+10+5000=5110`
-  
-Simplest clean demo with **nonzero quotient**:
+The AIR checks:
 
-- $q = 12289$
-- `sum_left = 130000`
-- `quot_l = floor(130000 / 12289) = 10`
-- `lhs_mod = 130000 - 10 × 12289 = 130000 - 122890 = 7110`
+- `sum_left - lhs_mod - quot_l · q = 25000 - 12711 - 12289 = 0`
+- `sum_right - rhs_mod - quot_r · q = 0`
 
-Take the **same** `sum_right = 130000` so `quot_r = 10`, `rhs_mod = 7110`. The trace would then witness `sig`, `v`, `pk`, `hm` that produce these sums; the AIR checks the algebra and `lhs_mod == rhs_mod`.
+**Step 4 — `quot_*` columns**
 
-The **14-bit `quot_*` columns** are exactly the bit decomposition of `quot_l` and `quot_r` (here `10 = 0b1010` in the low bits, rest zero).
+`quot_l` and `quot_r` are each reconstructed from **14 boolean bits** (little-endian). Here `1 = 1 + 0·2 + 0·4 + …`, so `quot_l_bits[0] = 1` and `quot_l_bits[1..] = 0` (and similarly for `quot_r`).
 
 ## What is proved today
 

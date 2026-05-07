@@ -1,0 +1,25 @@
+[package]
+name = "mldsa-plonky3"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "ML-DSA (Dilithium) verification experiments with Plonky3 STARKs"
+
+[dependencies]
+ml-dsa = { path = "../third_party/ml-dsa", default-features = false }
+
+p3-air = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-challenger = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-commit = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-dft = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-field = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-fri = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-koala-bear = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-matrix = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-merkle-tree = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-poseidon2 = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-symmetric = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+p3-uni-stark = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+
+[dev-dependencies]
+p3-util = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }

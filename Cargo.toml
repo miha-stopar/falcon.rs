@@ -6,5 +6,6 @@ members = [
     "falcon-plonk",
     "falcon-plonky3",
     "falcon-rust",
+    "mldsa-plonky3",
 ]
 resolver = "2"

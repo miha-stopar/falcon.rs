@@ -22,6 +22,11 @@ p3-symmetric = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71b
 p3-uni-stark = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
 p3-util = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
 
+[dev-dependencies]
+p3-air = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+rand_chacha = "0.3.1"
+rand_core = "0.6.3"
+
 [features]
 default = ["falcon-1024"]
 falcon-512 = ["falcon-rust/falcon-512"]

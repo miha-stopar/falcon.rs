@@ -1,12 +1,16 @@
 use falcon_rust::{
-    DualNTTPolynomial, DualPolynomial, NTTPolynomial, Polynomial, PublicKey, Signature, N,
-    MODULUS,
+    DualNTTPolynomial, DualPolynomial, NTTPolynomial, Polynomial, PublicKey, Signature, LOG_N, N,
+    MODULUS, MODULUS_MINUS_1_OVER_TWO, SIG_L2_BOUND,
 };
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::air::{NUM_MAIN_COLS, NUM_PREPROCESSED_COLS, QUOT_BITS};
+use crate::air::{
+    butterfly_j_jht_s, state_before_ntt_layer, ACCUM_BITS, BOUND_DIFF_BITS, COEFF_DUAL_ZERO_MAIN_COLS,
+    DELTA_Q_BITS, FalconNttLayerAir, L2_MAIN_COLS, NUM_MAIN_COLS, NTT_LAYER_MAIN_COLS,
+    NUM_PREPROCESSED_COLS, QUOT_BITS, SLACK_BITS,
+};
 use crate::FalconDualNttEquationAir;
 
 fn fe_u16(x: u16) -> KoalaBear {
@@ -15,6 +19,18 @@ fn fe_u16(x: u16) -> KoalaBear {
 
 fn fe_u32(x: u32) -> KoalaBear {
     <KoalaBear as PrimeCharacteristicRing>::from_u32(x)
+}
+
+fn u32_to_bits_le<const B: usize>(x: u32) -> [u16; B] {
+    debug_assert!(B <= 32);
+    let mut bits = [0u16; B];
+    let mut v = x;
+    for i in 0..B {
+        bits[i] = (v & 1) as u16;
+        v >>= 1;
+    }
+    debug_assert_eq!(v, 0, "value uses more than {B} bits");
+    bits
 }
 
 fn quot_to_bits_le(x: u16) -> [u16; QUOT_BITS] {
@@ -101,4 +117,169 @@ pub fn build_falcon_dual_ntt_instance(
     let main = RowMajorMatrix::new(main_vals, NUM_MAIN_COLS);
     let air = FalconDualNttEquationAir::new(preprocessed);
     (air, main)
+}
+
+/// Main trace for [`crate::air::FalconL2BoundAir`]: `4 * N` rows
+/// (`sig_pos`, `sig_neg`, `v_pos`, `v_neg` coefficients) and running L² accumulation.
+pub fn build_falcon_l2_bound_trace(
+    pk: &PublicKey,
+    msg: &[u8],
+    sig: &Signature,
+) -> RowMajorMatrix<KoalaBear> {
+    let pk_poly: Polynomial = pk.into();
+    let sig_poly: DualPolynomial = sig.into();
+    let hm = Polynomial::from_hash_of_message(msg, sig.nonce());
+    let uh_pos = sig_poly.pos * pk_poly;
+    let uh_neg = sig_poly.neg * pk_poly;
+    let v = hm - uh_pos + uh_neg;
+    let v_dual = DualPolynomial::from(&v);
+
+    let q = MODULUS as u32;
+    let qm1 = q - 1;
+    let half = MODULUS_MINUS_1_OVER_TWO as u32;
+    let total_rows = 4 * N;
+    let mut vals = Vec::with_capacity(total_rows * L2_MAIN_COLS);
+    let mut accum_u64: u64 = 0;
+
+    for row in 0..total_rows {
+        let (poly, idx) = match row / N {
+            0 => (&sig_poly.pos, row % N),
+            1 => (&sig_poly.neg, row % N),
+            2 => (&v_dual.pos, row % N),
+            3 => (&v_dual.neg, row % N),
+            _ => unreachable!(),
+        };
+        let e = u32::from(poly.coeff()[idx]);
+        debug_assert!(e < q);
+        let delta_q = qm1 - e;
+        let is_high = if e > half { 1u32 } else { 0u32 };
+        let slack_u32 = if is_high == 0 {
+            half - e
+        } else {
+            e - (half + 1)
+        };
+
+        let m = if is_high == 0 { e } else { q - e };
+        let contrib = (m as u64) * (m as u64);
+        accum_u64 += contrib;
+
+        for bit in quot_to_bits_le(e as u16) {
+            vals.push(fe_u16(bit));
+        }
+        for bit in u32_to_bits_le::<DELTA_Q_BITS>(delta_q) {
+            vals.push(fe_u16(bit));
+        }
+        vals.push(fe_u16(is_high as u16));
+        for bit in u32_to_bits_le::<SLACK_BITS>(slack_u32) {
+            vals.push(fe_u16(bit));
+        }
+
+        let accum_u32 = u32::try_from(accum_u64).expect("accum fits u32");
+        for bit in u32_to_bits_le::<ACCUM_BITS>(accum_u32) {
+            vals.push(fe_u16(bit));
+        }
+
+        let bound_diff = if row + 1 == total_rows {
+            u32::try_from(SIG_L2_BOUND - accum_u64).expect("accum <= SIG_L2_BOUND")
+        } else {
+            0u32
+        };
+        for bit in u32_to_bits_le::<BOUND_DIFF_BITS>(bound_diff) {
+            vals.push(fe_u16(bit));
+        }
+    }
+
+    debug_assert_eq!(accum_u64, {
+        let s = sig_poly.l2_norm();
+        let v = v_dual.l2_norm();
+        s + v
+    });
+    debug_assert!(accum_u64 <= SIG_L2_BOUND);
+
+    RowMajorMatrix::new(vals, L2_MAIN_COLS)
+}
+
+/// Main trace for [`crate::air::FalconCoeffDualProductZeroAir`]: coefficient-domain `sig_pos`,
+/// `sig_neg` as 14 + 14 little-endian bit columns per [`crate::air::QUOT_BITS`].
+pub fn build_falcon_coeff_dual_product_zero_trace(sig: &Signature) -> RowMajorMatrix<KoalaBear> {
+    let sig_poly: DualPolynomial = sig.into();
+    let w = COEFF_DUAL_ZERO_MAIN_COLS;
+    let mut vals = Vec::with_capacity(N * w);
+    for i in 0..N {
+        let pos = u32::from(sig_poly.pos.coeff()[i]);
+        let neg = u32::from(sig_poly.neg.coeff()[i]);
+        debug_assert!(pos < (1u32 << QUOT_BITS));
+        debug_assert!(neg < (1u32 << QUOT_BITS));
+        for bit in quot_to_bits_le(pos as u16) {
+            vals.push(fe_u16(bit));
+        }
+        for bit in quot_to_bits_le(neg as u16) {
+            vals.push(fe_u16(bit));
+        }
+    }
+    debug_assert_eq!(vals.len(), N * w);
+    RowMajorMatrix::new(vals, w)
+}
+
+/// Main trace for [`crate::air::FalconNttLayerAir`]: one row per butterfly at NTT layer `layer`.
+pub fn build_ntt_layer_main_trace(poly: &Polynomial, layer: usize) -> RowMajorMatrix<KoalaBear> {
+    assert!(layer < LOG_N);
+    let state = state_before_ntt_layer(poly, layer);
+    let q = u32::from(MODULUS);
+    let mut vals = Vec::with_capacity((N / 2) * NTT_LAYER_MAIN_COLS);
+    for b in 0..N / 2 {
+        let (j, j2, s) = butterfly_j_jht_s(layer, b);
+        let u = u32::from(state[j]);
+        let v_in = u32::from(state[j2]);
+        let prod = v_in * u32::from(s);
+        let v_mul = (prod % q) as u32;
+        let quot_vs = u16::try_from((prod - v_mul) / q).expect("quot_vs fits");
+        debug_assert!(u64::from(quot_vs) < (1u64 << QUOT_BITS));
+
+        let out0 = (u + v_mul) % q;
+        let out1 = (u + q - v_mul) % q;
+        let q0: u16 = ((u + v_mul - out0) / q) as u16;
+        let q1: u16 = ((u + q - v_mul - out1) / q) as u16;
+        debug_assert!(q0 <= 1 && q1 <= 1);
+
+        for bit in quot_to_bits_le(u as u16) {
+            vals.push(fe_u16(bit));
+        }
+        for bit in quot_to_bits_le(v_in as u16) {
+            vals.push(fe_u16(bit));
+        }
+        for bit in quot_to_bits_le(v_mul as u16) {
+            vals.push(fe_u16(bit));
+        }
+        for bit in quot_to_bits_le(quot_vs) {
+            vals.push(fe_u16(bit));
+        }
+        for bit in quot_to_bits_le(out0 as u16) {
+            vals.push(fe_u16(bit));
+        }
+        for bit in quot_to_bits_le(out1 as u16) {
+            vals.push(fe_u16(bit));
+        }
+        vals.push(fe_u16(q0));
+        vals.push(fe_u16(q1));
+    }
+    debug_assert_eq!(vals.len(), (N / 2) * NTT_LAYER_MAIN_COLS);
+    RowMajorMatrix::new(vals, NTT_LAYER_MAIN_COLS)
+}
+
+/// Preprocessed + main traces for [`crate::air::FalconNttLayerAir`] at `layer`.
+pub fn build_ntt_layer_instance(
+    poly: &Polynomial,
+    layer: usize,
+) -> (FalconNttLayerAir, RowMajorMatrix<KoalaBear>) {
+    assert!(layer < LOG_N);
+    let prep = FalconNttLayerAir::preprocessed_for_layer(layer);
+    let air = FalconNttLayerAir::new(prep);
+    let main = build_ntt_layer_main_trace(poly, layer);
+    (air, main)
+}
+
+/// Convenience: layer `0` main trace only (twiddles are uniform; use [`FalconNttLayerAir::new_for_layer0`]).
+pub fn build_ntt_layer0_trace(poly: &Polynomial) -> RowMajorMatrix<KoalaBear> {
+    build_ntt_layer_main_trace(poly, 0)
 }

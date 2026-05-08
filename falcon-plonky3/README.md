@@ -86,7 +86,7 @@ flowchart LR
 Checklist for a “complete” statement:
 
 - [ ] Bind `pk_ntt` and `hm_ntt` to the intended **public** values (same role as public inputs in `falcon-r1cs` / `falcon-plonk`).
-- [ ] **Chain** [`FalconNttLayerAir`](src/air/ntt_layer.rs) layers and connect the final NTT to the dual-NTT congruence columns (coeffs ↔ NTT; coeff dual-zero AIR still separate), plus **norm / range** checks to match `falcon-r1cs` / `falcon-plonk`.
+- [ ] **Chain** NTT layers and connect the final NTT to the dual-NTT congruence columns in **one** proof (or a specified composition), and link coeff dual-zero to the same witness as the NTT inputs. **L²** is already covered by [`FalconL2BoundAir`](src/air/l2_bound.rs) in [`full_verify`](src/full_verify.rs) (separate proof today).
 
 ## Numeric toy example (one NTT index)
 
@@ -168,9 +168,7 @@ For each row $i$, the NTT AIR enforces:
 
 This matches the **per-index congruence** proved in [`FalconDualNTTVerificationCircuit`](../falcon-r1cs/src/circuits/falcon_dual_ntt.rs) (modulo the R1CS `mod_q` gadget encoding), **without** yet proving that the **`sig_ntt` / `v_ntt` columns are the full NTT of coefficient data inside the same proof** (each Cooley–Tukey **layer** can be proved separately via [`FalconNttLayerAir`](src/air/ntt_layer.rs); **chaining** those layers and tying the result to this trace is still open).
 
-Still open: Falcon **norm / range** bounds.
-
-Coefficient-domain **`sig_pos[i]·sig_neg[i]=0`** is handled by the separate [`FalconCoeffDualProductZeroAir`](src/air/coeff_dual_product_zero.rs), still **without** linking those limbs to the NTT signature columns.
+The **L² bound** (`SIG_L2_BOUND`) is proved in-circuit by [`FalconL2BoundAir`](src/air/l2_bound.rs) and included in [`full_verify`](src/full_verify.rs); coefficient-domain **`sig_pos[i]·sig_neg[i]=0`** remains a separate AIR, still **without** automatically linking those limbs to the NTT columns in one trace.
 
 ## Field sizes: KoalaBear vs BLS12-381 `Fr`
 
@@ -227,6 +225,59 @@ flowchart TB
     B3["No single BIG_CONSTANT — would not fit in ~31 bits"]
   end
 ```
+
+## Falcon on Plonky3: concrete challenges (FAQ)
+
+This section spells out *why* some `falcon-r1cs` patterns do not carry over unchanged, in terms of concrete arithmetic and soundness—not hand-waving about “small fields.”
+
+### 1. Small base field (KoalaBear): what actually breaks?
+
+KoalaBear is a ~31-bit prime field \(p \approx 2^{31}\). A trace cell holds **one residue mod \(p\)**, not an unbounded integer. Concrete issues:
+
+| Issue | What goes wrong | Example / condition |
+|--------|------------------|---------------------|
+| **Modular wrap on `+` / `×`** | If you intend integer \(a+b\) or \(a\cdot b\) but the true integer exceeds \(p\), the field stores the value **mod \(p\)**. Constraints that only check **field** equality then prove the wrong **integer** statement. | Any accumulator that could exceed \(p\) without explicit limb/carry/range checks. |
+| **Embedding huge constants** | The deferred-NTT gadget uses integers like \(2^{LOG\_N}\, q^{LOG\_N+1}\) (hundreds of bits for Falcon-1024). In KoalaBear you only have **`C mod p`**, not `C`. Every identity that uses `C` as an **integer** (e.g. `C - v`) becomes false in general. | See the table under *“Why we cannot copy falcon-r1cs NTT verbatim”* above: \(\approx 2^{160}\) vs \(\approx 2^{31}\). |
+| **Sound comparisons / “≤”** | Proving `x ≤ B` as integers needs witnesses (bits, differences) so a cheating prover cannot use **wraparound** to make a field equation look like a true inequality. | L² accumulation: see below. |
+| **What still works without redesign** | Values provably **always** \(< p\) and closed under the ops you use (e.g. products \(< q^2 < p\), sums of a few such terms) behave like integers. | Dual-NTT row: `sig_ntt·pk_ntt`, small quotients, etc., as implemented in [`FalconDualNttEquationAir`](src/air/dual_ntt_equation.rs). |
+
+### 2. Deferred NTT (`falcon-r1cs`) vs per-layer \(\bmod q\) (`falcon_rust` / this repo)—more detail
+
+**Native Falcon / `falcon_rust::ntt`:** each butterfly works in \(\mathbb{Z}_q\): multiply by a twiddle, **reduce mod \(q\)**, add/subtract, **reduce again**. All lane values stay in \([0,q)\) (or a small envelope). The NTT is correct **in the ring** \(\mathbb{Z}_q[X]/(X^N+1)\).
+
+**`falcon-r1cs` deferred NTT:** the implementation keeps **larger intermediate integers inside the R1CS field** \(\mathbb{F}\) (e.g. BLS12-381 scalar, \(\sim 2^{256}\)). A butterfly step uses a **large** `BIG_CONSTANT` (a power-of-two multiple of a power of \(q\)) so that `BIG_CONSTANT - v` simulates a signed lift **without** reducing \(v\) mod \(q\) at every layer. Only **after** all layers does the gadget apply **`mod_q`** per coefficient. For that to be **sound**, every *true* integer used in those butterflies—including `BIG_CONSTANT` and intermediate sums—must be **\(< |\mathbb{F}^\times|\)** so that field operations match integer operations.
+
+**Why that does not port to KoalaBear:** for later layers, `BIG_CONSTANT` is enormous (see table: \(\sim 2^{160}\) for Falcon-1024). You **cannot** store that integer in a KoalaBear cell; you store `BIG_CONSTANT mod p`, and the subtraction `BIG_CONSTANT - v` in the field is **not** the integer subtraction you wanted. The whole deferred-reduction algebra assumes “one big prime, no wrap.”
+
+**What Plonky3 does instead:** follow **`falcon_rust`-style** butterflies: **each** step proves modular multiplication (`v_in·s = v_mul + quot·q`) and modular additions with small quotient bits. That is **more steps and more witness columns**, but every quantity fits under \(p\) and field arithmetic matches integer arithmetic on the values you care about.
+
+### 3. One combined AIR: why quotient and trace shape matter
+
+There is no mathematical obstruction to putting NTT, dual-NTT, coeff checks, and L² in **one** AIR. What makes that a serious engineering step is how STARKs pay for constraints:
+
+- **Constraint degree:** the highest degree among all AIR identities (after selectors) drives the **quotient** polynomial degree and hence FRI/PCS work. Stacking NTT butterflies (already multiplicative degree several), per-row dual-NTT identities, bit lookups, and L² accumulation in one constraint set often **raises** that maximum compared to separate AIRs tuned in isolation.
+- **Single trace geometry:** today’s pieces use different natural heights (`N` for the congruence AIR, \((N/2)\cdot LOG_N\) padded for full NTT, `4N` for L², etc.). One matrix means **padding**, **selector columns** to turn constraints off on inactive rows, or a custom layout—each choice affects width, degree, and soundness bookkeeping.
+- **Prover cost:** work scales roughly with trace size (width × height) and with the quotient pipeline derived from degree. A unified trace can be **wider and/or taller** than the sum of minimal separate traces if you are not careful.
+
+### 4. L²: why not “one big field variable” for the running sum?
+
+In `falcon-r1cs`, the norm is accumulated in a single `FpVar` over a **huge** field: intermediate partial sums for a valid signature stay tiny compared to the modulus, so **`acc + x²` in \(\mathbb{F}\)** equals **integer** `acc + x²` with no wrap. No extra machinery.
+
+In KoalaBear:
+
+- The **final** L² value is \(\le \texttt{SIG\_L2\_BOUND}\) (\(\sim 10^7\)–\(10^8\)), well below \(p\).
+- But the **constraint** must rule out a **malicious** trace where the prover uses field addition so that the stored “accumulator” wraps mod \(p\) while still satisfying some loose equations.
+
+So you need an encoding where addition is **integer addition on bounded witnesses**: e.g. boolean bits for the running sum, transition rows `acc_next = acc_cur + contrib`, and a final `acc + slack = SIG_L2_BOUND`, plus bit decomposition for `e < q` and centered magnitude (see [`FalconL2BoundAir`](src/air/l2_bound.rs)). That is the same *soundness* issue as any small-field accumulator, not “L² is too big for KoalaBear.”
+
+### Dilithium (ML-DSA): concrete circuit pain points
+
+Dilithium will be implemented in this workspace as well; the bullets below are **concrete costs** tied to the ML-DSA verification formula (useful for Falcon readers comparing verifier shape).
+
+- **Hashing (SHAKE-256 / SHAKE-128):** the signing and verification APIs are built around XOF output. Implementing SHAKE **inside** a SNARK/STARK is thousands to millions of constraints per absorbed block; many designs **hash outside** the proof and bind the digest as a public input, or use a proof-system-specific hash gadget if the statement must be fully in-circuit.
+- **Decomposition / hints:** coefficients are split into high and low parts (`t0`, `t1`, powers-of-2 ranges, hint vectors) with **explicit inequalities** and range checks—same *class* of work as Falcon’s quotients and L², but over different moduli (`q`, \(\gamma_1\), etc.) and larger witness vectors.
+- **Linear algebra mod \(q\):** matrix–vector products and additions in \(\mathbb{Z}_q\) are many bounded products and sums; on a **small** proof field you still need “no wrap” or limb logic wherever an intermediate can exceed the native prime.
+- **Scale:** parameter sets use larger structured matrices than a minimal Falcon instance—**trace width and row count** tend to grow, which hits prover time even when individual ops are simple.
 
 ## Running tests
 

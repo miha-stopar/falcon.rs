@@ -6,9 +6,9 @@ Plonky3 STARK scaffolding for Falcon signature verification (see [`falcon-rust`]
 
 Rows are indexed by NTT coefficient $i = 0 \ldots N-1$ (with $N = 512$ or $1024$). One row = one NTT index.
 
-### Preprocessed trace (2 columns)
+### Public periodic columns (2 columns, period $N$)
 
-Committed once per statement; intended to correspond to **public** Falcon data (same role as `pk_ntt` / `hm_ntt` inputs in Groth16 examples).
+[`FalconDualNttEquationAir`](src/air/dual_ntt_equation.rs) exposes **`pk_ntt[i]`** and **`hm_ntt[i]`** as **periodic** parameters (length-$N$ tables), not as a committed preprocessed trace. Both prover and verifier instantiate the same [`FalconDualNttEquationAir::new`](src/air/dual_ntt_equation.rs) data from `(pk, msg, sig)`; Plonky3’s STARK driver folds periodic data into the Fiat–Shamir transcript (see Plonky3 `uni-stark` prover). This binds the dual-NTT statement to the intended public-key / message-hash NTT values at the proof-system level.
 
 | Col | Name     | Meaning |
 |-----|----------|---------|
@@ -31,7 +31,7 @@ Private witness per row. Coefficients are still **Falcon residues mod** `q = 122
 ### Diagram (one row)
 
 ```text
-Preprocessed                          Main (witness)
+Periodic (public, period N)              Main (witness)
 +----------------+                    +------------------------------------------+
 | pk_ntt[i]      |                    | sig_pos_ntt  sig_neg_ntt             |
 | hm_ntt[i]      |                    | v_pos_ntt    v_neg_ntt               |
@@ -45,7 +45,7 @@ Mermaid (dependency view for enforced identities):
 
 ```mermaid
 flowchart LR
-  subgraph prep [Preprocessed]
+  subgraph prep [Periodic public]
     pk[pk_ntt]
     hm[hm_ntt]
   end
@@ -81,11 +81,12 @@ flowchart LR
 
 ## To tighten (statement binding)
 
-`hm` is obtained from `(message, nonce)` by Falcon’s hash-to-point; the **verifier checks that in the clear** outside the STARK. The proof statement should still fix **`pk_ntt` and `hm_ntt`** (e.g. preprocessed trace, public openings, or Fiat–Shamir binding) so the prover cannot swap in other polynomials.
+`hm` is obtained from `(message, nonce)` by Falcon’s hash-to-point; the **verifier checks that in the clear** outside the STARK. The proof statement should still fix **`pk_ntt` and `hm_ntt`** to the intended public values (and, for a fully transparent verifier, bind **hashing / parsing**).
 
 Checklist for a “complete” statement:
 
-- [ ] Bind `pk_ntt` and `hm_ntt` to the intended **public** values (same role as public inputs in `falcon-r1cs` / `falcon-plonk`).
+- [x] Bind `pk_ntt` and `hm_ntt` to the intended **public** values — done for the dual-NTT AIR via **periodic columns** + shared [`FalconDualNttEquationAir`](src/air/dual_ntt_equation.rs) construction in [`prove_falcon_parsed_verify`](src/full_verify.rs) / [`verify_falcon_parsed_verify`](src/full_verify.rs) (no longer only a prover-chosen preprocessed trace commitment).
+- [ ] Bind **`hm_ntt`** derivation to **`(message, nonce)`** inside the proof system (or fix a hash digest as a public input with a specified in-circuit / out-of-circuit split).
 - [ ] **Chain** NTT layers and connect the final NTT to the dual-NTT congruence columns in **one** proof (or a specified composition), and link coeff dual-zero to the same witness as the NTT inputs. **L²** is already covered by [`FalconL2BoundAir`](src/air/l2_bound.rs) in [`full_verify`](src/full_verify.rs) (separate proof today).
 
 ## NTT one layer at a time (`FalconNttLayerAir`)

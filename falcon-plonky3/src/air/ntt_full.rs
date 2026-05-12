@@ -1,7 +1,7 @@
 //! All **`LOG_N`** Cooley–Tukey layers of Falcon’s forward NTT in **one** padded trace.
 //!
 //! Preprocessed columns fix **`(u, v)`** inputs per butterfly (from the statement polynomial in
-//! clear text — same model as public `pk_ntt` / `hm_ntt` in the dual-NTT AIR). The prover shows
+//! clear text — same model as the **periodic** `pk_ntt` / `hm_ntt` inputs in the dual-NTT AIR). The prover shows
 //! correct modular butterfly arithmetic for every real row; padding rows (`active = 0`) force
 //! **main = 0**.
 //!

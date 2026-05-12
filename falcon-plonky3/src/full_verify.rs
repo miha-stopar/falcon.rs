@@ -1,7 +1,8 @@
 //! End-to-end Falcon **parsed-verify** decomposition into Plonky3 STARKs (transparent setting).
 //!
-//! Verifier-side inputs (`pk_ntt`, `hm_ntt`, per-layer NTT inputs in preprocessed traces) are
-//! derived in the clear from `(pk, msg, sig)` the same way as in [`crate::witness::build_falcon_dual_ntt_instance`].
+//! Verifier-side periodic inputs (`pk_ntt`, `hm_ntt` per index, period `N`) and per-layer NTT
+//! inputs in preprocessed traces for full NTT are derived in the clear from `(pk, msg, sig)` the
+//! same way as in [`crate::witness::build_falcon_dual_ntt_instance`].
 //!
 //! ## What is covered
 //!
@@ -57,11 +58,8 @@ pub fn prove_falcon_parsed_verify(
     let config = stark_config_poseidon2();
 
     let (dual_air, dual_main) = build_falcon_dual_ntt_instance(pk, msg, sig);
-    let dual_deg = log2_strict_usize(dual_main.height());
-    let (dual_pp, dual_vk) = setup_preprocessed(&config, &dual_air, dual_deg).expect("dual_ntt setup");
-    debug_assert_eq!(dual_pp.degree_bits, dual_deg + config.is_zk());
-    let dual_ntt = prove_with_preprocessed(&config, &dual_air, dual_main, &[], Some(&dual_pp));
-    assert!(verify_with_preprocessed(&config, &dual_air, &dual_ntt, &[], Some(&dual_vk)).is_ok());
+    let dual_ntt = prove(&config, &dual_air, dual_main, &[]);
+    assert!(verify(&config, &dual_air, &dual_ntt, &[]).is_ok());
 
     let coeff_air = FalconCoeffDualProductZeroAir::new();
     let coeff_main = build_falcon_coeff_dual_product_zero_trace(sig);
@@ -112,7 +110,7 @@ pub fn prove_falcon_parsed_verify(
     }
 }
 
-/// Verify every proof in `bundle` (re-runs `setup_preprocessed` from AIR definitions — supply same `pk,msg,sig` to rebuild preprocessed data).
+/// Verify every proof in `bundle` (rebuilds each `Air` from `pk,msg,sig` so periodic / preprocessed data match the proof).
 pub fn verify_falcon_parsed_verify(
     pk: &PublicKey,
     msg: &[u8],
@@ -121,10 +119,8 @@ pub fn verify_falcon_parsed_verify(
 ) -> Result<(), p3_uni_stark::VerificationError<p3_uni_stark::PcsError<FalconStarkConfig>>> {
     let config = stark_config_poseidon2();
 
-    let (dual_air, dual_main) = build_falcon_dual_ntt_instance(pk, msg, sig);
-    let dual_deg = log2_strict_usize(dual_main.height());
-    let (_, dual_vk) = setup_preprocessed(&config, &dual_air, dual_deg).expect("dual_ntt setup");
-    verify_with_preprocessed(&config, &dual_air, &bundle.dual_ntt, &[], Some(&dual_vk))?;
+    let (dual_air, _dual_main) = build_falcon_dual_ntt_instance(pk, msg, sig);
+    verify(&config, &dual_air, &bundle.dual_ntt, &[])?;
 
     let coeff_air = FalconCoeffDualProductZeroAir::new();
     verify(&config, &coeff_air, &bundle.coeff_dual_zero, &[])?;

@@ -8,8 +8,8 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use crate::air::{
     butterfly_j_jht_s, state_before_ntt_layer, ACCUM_BITS, BOUND_DIFF_BITS, COEFF_DUAL_ZERO_MAIN_COLS,
-    DELTA_Q_BITS, FalconNttLayerAir, L2_MAIN_COLS, NUM_MAIN_COLS, NTT_LAYER_MAIN_COLS,
-    NUM_PREPROCESSED_COLS, QUOT_BITS, SLACK_BITS,
+    DELTA_Q_BITS, FalconNttLayerAir, L2_MAIN_COLS, NUM_MAIN_COLS, NTT_LAYER_MAIN_COLS, QUOT_BITS,
+    SLACK_BITS,
 };
 use crate::FalconDualNttEquationAir;
 
@@ -65,7 +65,8 @@ pub fn build_falcon_dual_ntt_instance(
     let sig_ntt = DualNTTPolynomial::from(&sig_poly);
     let v_ntt = DualNTTPolynomial::from(&v_dual);
 
-    let mut prep_vals = Vec::with_capacity(N * NUM_PREPROCESSED_COLS);
+    let mut pk_ntt_vals = Vec::with_capacity(N);
+    let mut hm_ntt_vals = Vec::with_capacity(N);
     let mut main_vals = Vec::with_capacity(N * NUM_MAIN_COLS);
     let q = u64::from(MODULUS);
     for i in 0..N {
@@ -93,8 +94,8 @@ pub fn build_falcon_dual_ntt_instance(
         let bits_l = quot_to_bits_le(quot_l);
         let bits_r = quot_to_bits_le(quot_r);
 
-        prep_vals.push(fe_u16(pk_i));
-        prep_vals.push(fe_u16(hm_ntt.coeff()[i]));
+        pk_ntt_vals.push(fe_u16(pk_i));
+        hm_ntt_vals.push(fe_u16(hm_ntt.coeff()[i]));
 
         main_vals.push(fe_u16(sp));
         main_vals.push(fe_u16(sn));
@@ -113,9 +114,8 @@ pub fn build_falcon_dual_ntt_instance(
     }
     debug_assert_eq!(main_vals.len(), N * NUM_MAIN_COLS);
 
-    let preprocessed = RowMajorMatrix::new(prep_vals, NUM_PREPROCESSED_COLS);
     let main = RowMajorMatrix::new(main_vals, NUM_MAIN_COLS);
-    let air = FalconDualNttEquationAir::new(preprocessed);
+    let air = FalconDualNttEquationAir::new(pk_ntt_vals, hm_ntt_vals);
     (air, main)
 }
 

@@ -5,6 +5,7 @@
 //! (numeric examples + diagram), and a numeric `quot_*` example.
 //!
 //! The [`FalconDualNttEquationAir`] enforces, per NTT index:
+//! - public periodic **`pk_ntt`**, **`hm_ntt`** (see [`air::dual_ntt_equation`](crate::air::dual_ntt_equation)),
 //! - `prod_sig_pos_pk = sig_pos_ntt * pk_ntt` and `prod_sig_neg_pk = sig_neg_ntt * pk_ntt` in KoalaBear
 //!   (sound because true products are $< q^2$ and below the KoalaBear prime),
 //! - `hm + v_neg + prod_sig_neg_pk = lhs_mod + quot_l * MODULUS` and the symmetric right side,

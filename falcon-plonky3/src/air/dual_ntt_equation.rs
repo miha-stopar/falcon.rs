@@ -1,30 +1,37 @@
 //! AIR for the per-index dual-NTT verification equation (see `falcon-r1cs`
-//! `FalconDualNTTVerificationCircuit`).
+//! [`FalconDualNTTVerificationCircuit`](../../falcon-r1cs/src/circuits/falcon_dual_ntt.rs)).
 //!
 //! Enforces mod-`q` congruence via products in KoalaBear (safe below \(q^2\)) and
 //! explicit division with 14-bit quotient witnesses.
+//!
+//! ## Public statement data (`pk_ntt`, `hm_ntt`)
+//!
+//! These are **not** in the committed preprocessed trace. They appear as **two periodic
+//! columns** of period `N` (see [`BaseAir::periodic_columns`](p3_air::BaseAir::periodic_columns)):
+//! both prover and verifier derive the same values from the [`FalconDualNttEquationAir`] struct,
+//! and the STARK pipeline incorporates periodic parameters into the Fiat–Shamir transcript (see
+//! Plonky3 `uni-stark` prover). That matches the README goal of binding the dual-NTT statement
+//! to the intended public polynomials instead of hiding them only inside a prover-chosen trace.
 
 use core::borrow::Borrow;
 
-use p3_air::{Air, AirBuilder, BaseAir, FilteredAirBuilder, WindowAccess};
+use p3_air::{
+    Air, AirBuilder, BaseAir, FilteredAirBuilder, PeriodicAirBuilder, WindowAccess,
+};
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
-use p3_matrix::Matrix;
 
-use falcon_rust::MODULUS;
+use falcon_rust::{MODULUS, N};
 
 /// Bits for quotient witnesses: max quotient is below \(q\) (see README).
 pub const QUOT_BITS: usize = 14;
 
-pub const NUM_PREPROCESSED_COLS: usize = 2;
-pub const NUM_MAIN_COLS: usize = 8 + 2 * QUOT_BITS;
+/// Dual-NTT AIR uses **periodic** columns for `pk_ntt` / `hm_ntt` (length `N` each), not a
+/// committed preprocessed trace.
+pub const NUM_DUAL_NTT_PERIODIC_COLUMNS: usize = 2;
 
-#[repr(C)]
-pub struct PreprocessedRow<F> {
-    pub pk_ntt: F,
-    pub hm_ntt: F,
-}
+pub const NUM_MAIN_COLS: usize = 8 + 2 * QUOT_BITS;
 
 #[repr(C)]
 pub struct MainRow<F> {
@@ -40,17 +47,6 @@ pub struct MainRow<F> {
     pub quot_r_bits: [F; QUOT_BITS],
 }
 
-impl<F> Borrow<PreprocessedRow<F>> for [F] {
-    fn borrow(&self) -> &PreprocessedRow<F> {
-        debug_assert_eq!(self.len(), NUM_PREPROCESSED_COLS);
-        let (prefix, shorts, suffix) = unsafe { self.align_to::<PreprocessedRow<F>>() };
-        debug_assert!(prefix.is_empty());
-        debug_assert!(suffix.is_empty());
-        debug_assert_eq!(shorts.len(), 1);
-        &shorts[0]
-    }
-}
-
 impl<F> Borrow<MainRow<F>> for [F] {
     fn borrow(&self) -> &MainRow<F> {
         debug_assert_eq!(self.len(), NUM_MAIN_COLS);
@@ -62,20 +58,20 @@ impl<F> Borrow<MainRow<F>> for [F] {
     }
 }
 
+/// `pk_ntt[i]`, `hm_ntt[i]` for `i ∈ [0,N)` as **public periodic parameters** (period `N`).
 #[derive(Clone, Debug)]
 pub struct FalconDualNttEquationAir {
-    preprocessed: RowMajorMatrix<KoalaBear>,
+    pk_ntt: Vec<KoalaBear>,
+    hm_ntt: Vec<KoalaBear>,
 }
 
 impl FalconDualNttEquationAir {
-    pub fn new(preprocessed: RowMajorMatrix<KoalaBear>) -> Self {
-        assert_eq!(
-            preprocessed.width(),
-            NUM_PREPROCESSED_COLS,
-            "preprocessed width must match pk_ntt, hm_ntt"
-        );
-        assert!(preprocessed.height().is_power_of_two());
-        Self { preprocessed }
+    /// `pk_ntt` and `hm_ntt` must each have length [`N`](falcon_rust::N); they are exposed as
+    /// periodic columns for statement binding.
+    pub fn new(pk_ntt: Vec<KoalaBear>, hm_ntt: Vec<KoalaBear>) -> Self {
+        assert_eq!(pk_ntt.len(), N, "pk_ntt length must be N");
+        assert_eq!(hm_ntt.len(), N, "hm_ntt length must be N");
+        Self { pk_ntt, hm_ntt }
     }
 }
 
@@ -85,11 +81,19 @@ impl BaseAir<KoalaBear> for FalconDualNttEquationAir {
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<KoalaBear>> {
-        Some(self.preprocessed.clone())
+        None
     }
 
     fn preprocessed_width(&self) -> usize {
-        NUM_PREPROCESSED_COLS
+        0
+    }
+
+    fn num_periodic_columns(&self) -> usize {
+        NUM_DUAL_NTT_PERIODIC_COLUMNS
+    }
+
+    fn periodic_columns(&self) -> Vec<Vec<KoalaBear>> {
+        vec![self.pk_ntt.clone(), self.hm_ntt.clone()]
     }
 
     fn main_next_row_columns(&self) -> Vec<usize> {
@@ -101,19 +105,26 @@ impl BaseAir<KoalaBear> for FalconDualNttEquationAir {
     }
 
     fn max_constraint_degree(&self) -> Option<usize> {
-        // Boolean checks (degree 2) and products like quot·q, sig·pk (degree 2).
         Some(3)
     }
 }
 
-fn eval_row_constraints<AB: AirBuilder<F = KoalaBear>>(b: &mut FilteredAirBuilder<'_, AB>) {
-    let prep_win = b.preprocessed();
-    let prep: &PreprocessedRow<AB::Var> = prep_win.current_slice().borrow();
+fn eval_row_constraints<AB>(b: &mut FilteredAirBuilder<'_, AB>)
+where
+    AB: AirBuilder<F = KoalaBear> + PeriodicAirBuilder<F = KoalaBear>,
+{
+    let per = b.periodic_values();
+    assert_eq!(
+        per.len(),
+        NUM_DUAL_NTT_PERIODIC_COLUMNS,
+        "expected pk_ntt and hm_ntt periodic columns"
+    );
+    let pk: AB::Expr = per[0].into();
+    let hm: AB::Expr = per[1].into();
+
     let main_win = b.main();
     let m: &MainRow<AB::Var> = main_win.current_slice().borrow();
 
-    let pk = prep.pk_ntt;
-    let hm = prep.hm_ntt;
     let sig_p = m.sig_pos_ntt;
     let sig_n = m.sig_neg_ntt;
     let v_p = m.v_pos_ntt;
@@ -130,11 +141,10 @@ fn eval_row_constraints<AB: AirBuilder<F = KoalaBear>>(b: &mut FilteredAirBuilde
         b.assert_bool(bit);
     }
 
-    // Integer products stay < q^2 < 2^31 < p_KoalaBear; field × matches ℤ.
-    b.assert_eq(prod_sp, sig_p * pk);
+    b.assert_eq(prod_sp, sig_p * pk.clone());
     b.assert_eq(prod_sn, sig_n * pk);
 
-    let sum_l = hm + v_n + prod_sn;
+    let sum_l = hm.clone() + v_n + prod_sn;
     let sum_r = v_p + prod_sp;
 
     let q_embed = KoalaBear::from_u32(u32::from(MODULUS));
@@ -155,7 +165,10 @@ fn eval_row_constraints<AB: AirBuilder<F = KoalaBear>>(b: &mut FilteredAirBuilde
     b.assert_eq(lhs, rhs);
 }
 
-impl<AB: AirBuilder<F = KoalaBear>> Air<AB> for FalconDualNttEquationAir {
+impl<AB> Air<AB> for FalconDualNttEquationAir
+where
+    AB: AirBuilder<F = KoalaBear> + PeriodicAirBuilder<F = KoalaBear>,
+{
     fn eval(&self, builder: &mut AB) {
         let mut t = builder.when_transition();
         eval_row_constraints(&mut t);

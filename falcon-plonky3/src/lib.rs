@@ -1,6 +1,8 @@
 //! Falcon signature verification expressed as a [Plonky3](https://github.com/Plonky3/Plonky3) STARK AIR.
 //!
-//! See **[`README.md`](./README.md)** for trace layout, remaining gaps vs a full verifier,
+//! See **[`README.md`](./README.md)** for trace layout, the **Tier 1 verifier-facing statement**
+//! (what STARKs bind vs what the verifier assumes from Rust),
+//! remaining gaps vs a full verifier,
 //! field sizes, why **`falcon-r1cs`’s deferred-reduction NTT** does not port to KoalaBear
 //! (numeric examples + diagram), and a numeric `quot_*` example.
 //!

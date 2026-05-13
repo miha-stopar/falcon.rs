@@ -4,6 +4,17 @@
 //! inputs in preprocessed traces for full NTT are derived in the clear from `(pk, msg, sig)` the
 //! same way as in [`crate::witness::build_falcon_dual_ntt_instance`].
 //!
+//! ## Verifier-facing statement (Tier 1)
+//!
+//! - **Inputs:** [`verify_falcon_parsed_verify`] takes `pk`, `msg`, `sig`, and the bundle. It does
+//!   **not** take prover-supplied `pk_ntt` / `hm_ntt`; it rebuilds every `Air` from `(pk, msg, sig)`.
+//! - **Dual-NTT:** proves the mod-`q` congruence for the main trace **given** those periodic
+//!   tables. It does **not** re-prove hash-to-point; `hm_ntt` is whatever this crate computes from
+//!   `(pk, msg, sig)` when constructing [`crate::air::FalconDualNttEquationAir`].
+//! - **Composition:** the seven proofs are verified independently; consistency is “same `(pk, msg, sig)`”
+//!   for all rebuilds. See the crate **[`README.md`](../README.md#verifier-facing-statement-tier-1-trust-model)**
+//!   for the full trust-model table.
+//!
 //! ## What is covered
 //!
 //! 1. [`crate::air::dual_ntt_equation::FalconDualNttEquationAir`] — dual-NTT congruence mod `q`.
@@ -34,6 +45,9 @@ use crate::witness::{
 use crate::{FalconCoeffDualProductZeroAir, FalconL2BoundAir, stark_config_poseidon2};
 
 /// Proof artifacts for one signature verification statement (all sub-proofs use the same [`FalconStarkConfig`]).
+///
+/// Cryptographic meaning is defined together with [`verify_falcon_parsed_verify`]: verifier-rebuilt
+/// parameters from `(pk, msg, sig)` plus the bundle. See the crate README *Verifier-facing statement*.
 pub struct FalconVerifyStarkBundle<SC: p3_uni_stark::StarkGenericConfig> {
     pub dual_ntt: p3_uni_stark::Proof<SC>,
     pub coeff_dual_zero: p3_uni_stark::Proof<SC>,

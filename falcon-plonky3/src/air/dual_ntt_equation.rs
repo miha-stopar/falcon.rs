@@ -12,8 +12,8 @@
 //! and the STARK pipeline incorporates periodic parameters into the Fiat–Shamir transcript (see
 //! Plonky3 `uni-stark` prover). That matches the README goal of binding the dual-NTT statement
 //! to the intended public polynomials instead of hiding them only inside a prover-chosen trace.
-//! The constraints **do not** prove `hm_ntt = NTT(HashToPoint(msg, nonce))`; they use whatever
-//! periodic `hm_ntt` the `Air` was constructed with (this crate’s verify path derives it in Rust).
+//! Periodic **`hm_ntt`** is a **verifier-supplied** table (hash-to-point + NTT in Rust in this
+//! crate); the AIR uses those values as given public data per row.
 //!
 //! ## Preprocessed NTT references
 //!

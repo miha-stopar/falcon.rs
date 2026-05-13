@@ -15,8 +15,8 @@ This section is the **single place** that states what the bundle **cryptographic
 
 | Sub-proof | Cryptographic content (relative to verifier-rebuilt parameters) |
 |-----------|-------------------------------------------------------------------|
-| Dual-NTT | Main trace satisfies the per-index mod-`q` congruence **given** the periodic `pk_ntt[i]`, `hm_ntt[i]` folded into that proof’s Fiat–Shamir / AIR instance. |
-| Coeff dual-zero | Coefficient limbs are boolean-split and `sig_pos[i]·sig_neg[i]=0`. |
+| Dual-NTT | Main trace satisfies the per-index mod-`q` congruence **given** periodic `pk_ntt[i]`, `hm_ntt[i]`; the first four main columns **equal** preprocessed reference NTT values for `sig_pos`, `sig_neg`, `v_pos`, `v_neg` at `i` (same derivation as native `NTTPolynomial` for those limbs). |
+| Coeff dual-zero | Bit reconstructions **equal** preprocessed expected `sig_pos[i]`, `sig_neg[i]` from the signature, and **`sig_pos[i]·sig_neg[i]=0`**. |
 | L² | Coefficient-domain centered square sum and `≤ SIG_L2_BOUND` (see [`FalconL2BoundAir`](src/air/l2_bound.rs)). |
 | Four full NTTs | Forward NTT of the four polynomials derived from `(pk, msg, sig)` matches the preprocessed twiddle schedule for those polynomials. |
 
@@ -26,7 +26,7 @@ This section is the **single place** that states what the bundle **cryptographic
 
 **Cross-proof linking**
 
-- The seven proofs are **not** one unified AIR. Consistency across them is **only** “the same `(pk, msg, sig)` was used to rebuild every verifier `Air` and trace shape.” There is no in-system constraint wiring full-NTT outputs into the dual-NTT main columns (see [To tighten](#to-tighten-statement-binding) below).
+- The seven proofs still use **separate** Fiat–Shamir transcripts. What is new: within the **dual-NTT** proof, the NTT-domain limbs are **not** a free witness independent of `(pk, msg, sig)`—they are **pinned** to verifier-rebuilt preprocessed references. Likewise, **coeff dual-zero** pins the bit witness to expected coefficients from `sig`. Algebraic agreement between those references and the **full NTT butterfly** proofs is still by construction in this crate (same tuple rebuilds every `Air`); there is no single AIR wiring butterfly outputs into the dual trace.
 
 ## Trace layout (per row)
 
@@ -35,6 +35,17 @@ Rows are indexed by NTT coefficient $i = 0 \ldots N-1$ (with $N = 512$ or $1024$
 ### Public periodic columns (2 columns, period $N$)
 
 [`FalconDualNttEquationAir`](src/air/dual_ntt_equation.rs) exposes **`pk_ntt[i]`** and **`hm_ntt[i]`** as **periodic** parameters (length-$N$ tables), not as a committed preprocessed trace. Both prover and verifier instantiate the same [`FalconDualNttEquationAir::new`](src/air/dual_ntt_equation.rs) data from `(pk, msg, sig)`; Plonky3’s STARK driver folds periodic data into the Fiat–Shamir transcript (see Plonky3 `uni-stark` prover). That **ties the dual-NTT proof** to those concrete periodic values **for this `Air` instance**—with this repo’s API, the values come from the verifier’s own derivation (see [Verifier-facing statement](#verifier-facing-statement-tier-1-trust-model)). The dual-NTT constraints still **do not** re-prove hash-to-point in-circuit; they use `hm_ntt` as given public data per row.
+
+### Preprocessed columns (dual-NTT): 4 columns, height $N$
+
+Committed **preprocessed** trace (verifier-rebuilt from `(pk, msg, sig)` the same way as proving): per row $i$, the expected NTT samples for **`sig_pos`**, **`sig_neg`**, **`v_pos`**, **`v_neg`** (KoalaBear-embedded residues mod $q$). The AIR requires equality with the first four **main** columns, so the dual-NTT witness cannot drift from the native `NTTPolynomial` values for those limbs under a verifier-constructed `Air`.
+
+| Col | Name | Meaning |
+|-----|------|---------|
+| 0 | `exp_sig_pos_ntt` | Expected `sig_pos` NTT at index $i$ |
+| 1 | `exp_sig_neg_ntt` | Expected `sig_neg` NTT at index $i$ |
+| 2 | `exp_v_pos_ntt` | Expected `v_pos` NTT at index $i$ |
+| 3 | `exp_v_neg_ntt` | Expected `v_neg` NTT at index $i$ |
 
 | Col | Name     | Meaning |
 |-----|----------|---------|
@@ -116,8 +127,10 @@ The checklist below tracks **stronger than Tier 1** goals (self-contained proof 
 Checklist for a “complete” statement:
 
 - [x] Bind `pk_ntt` and `hm_ntt` to the intended **public** values for the dual-NTT proof — done via **periodic columns** + shared [`FalconDualNttEquationAir`](src/air/dual_ntt_equation.rs) construction from `(pk, msg, sig)` in [`prove_falcon_parsed_verify`](src/full_verify.rs) / [`verify_falcon_parsed_verify`](src/full_verify.rs) (verifier does not trust prover-supplied periodic blobs).
+- [x] Bind dual-NTT **NTT-domain** witness columns (`sig_*_ntt`, `v_*_ntt`) to verifier-native NTT values — **preprocessed** four-column reference trace + equality constraints in [`FalconDualNttEquationAir`](src/air/dual_ntt_equation.rs) ([`build_falcon_dual_ntt_instance`](src/witness.rs)); prove/verify use `setup_preprocessed` / `prove_with_preprocessed` / `verify_with_preprocessed` for that sub-proof.
+- [x] Bind **coeff dual-zero** bit witness to expected **`sig_pos` / `sig_neg`** coefficients — **preprocessed** two-column reference + equality in [`FalconCoeffDualProductZeroAir`](src/air/coeff_dual_product_zero.rs) ([`build_falcon_coeff_dual_product_zero_instance`](src/witness.rs)).
 - [ ] Bind **`hm_ntt`** derivation to **`(message, nonce)`** *inside* the proof system (or fix a hash digest as a public input with a specified in-circuit / out-of-circuit split)—**beyond Tier 1**; today equality holds only because the verifier re-runs the same Rust derivation as proving.
-- [ ] **Chain** NTT layers and connect the final NTT to the dual-NTT congruence columns in **one** proof (or a specified composition), and link coeff dual-zero to the same witness as the NTT inputs. **L²** is already covered by [`FalconL2BoundAir`](src/air/l2_bound.rs) in [`full_verify`](src/full_verify.rs) (separate proof today).
+- [ ] **Single proof or explicit FS composition:** connect [`FalconNttFullAir`](src/air/ntt_full.rs) butterfly traces to the same PCS / transcript as the dual-NTT proof (today: independent proofs; consistency is same `(pk, msg, sig)` rebuild plus the preprocessed equalities above). Optionally link coeff dual-zero to **L²** / **full NTT** in one AIR.
 
 ## NTT one layer at a time (`FalconNttLayerAir`)
 
@@ -129,19 +142,20 @@ Forward NTT in [`falcon_rust::ntt`](../falcon-rust/src/arith/mod.rs) runs `LOG_N
 
 [`FalconNttFullAir`](src/air/ntt_full.rs) chains all `LOG_N` layers in **one** padded trace per polynomial limb (see [`tests/full_verify_prove.rs`](tests/full_verify_prove.rs) via [`full_verify`](src/full_verify.rs)).
 
-**Still open for a single-proof R1CS-style verifier:** wiring that full NTT output **as the same witness** as the `sig_*_ntt` / `v_*_ntt` columns in [`FalconDualNttEquationAir`](src/air/dual_ntt_equation.rs) (today those columns are filled from native NTT when building the dual-NTT trace).
+**Still open for a single-proof R1CS-style verifier:** wiring [`FalconNttFullAir`](src/air/ntt_full.rs) into the **same** transcript / trace as the dual-NTT congruence (today the dual NTT limbs are **pinned** to native NTT via preprocessed equality, and full NTT is proved separately).
 
 ## Coefficient-domain dual limbs (`FalconCoeffDualProductZeroAir`)
 
-A second AIR (no preprocessed columns) has one row per coefficient index $i$ and width **28**:
-14 little-endian bits for `sig_pos[i]` and 14 for `sig_neg[i]`. It enforces boolean bits and
-**`sig_pos[i] * sig_neg[i] = 0`**, matching the split in [`DualPolynomial::from`](../falcon-rust/src/arith/dual_poly.rs) used by [`verify_parsed_sig`](../falcon-rust/src/structs/pk.rs).
+A second AIR has one row per coefficient index $i$ and width **28** on the main trace:
+14 little-endian bits for `sig_pos[i]` and 14 for `sig_neg[i]`. It enforces boolean bits,
+**`sig_pos[i] * sig_neg[i] = 0`**, and **equality** of the reconstructed values to two
+**preprocessed** columns holding the expected coefficients from the signature (verifier-rebuilt).
 
 Implementation: [`src/air/coeff_dual_product_zero.rs`](src/air/coeff_dual_product_zero.rs), witness
-[`build_falcon_coeff_dual_product_zero_trace`](src/witness.rs), test
+[`build_falcon_coeff_dual_product_zero_instance`](src/witness.rs) (or [`build_falcon_coeff_dual_product_zero_trace`](src/witness.rs) for main only), test
 [`tests/coeff_dual_zero_prove.rs`](tests/coeff_dual_zero_prove.rs).
 
-This does **not** connect those coefficient limbs to the NTT values in the dual-NTT AIR; [`full_verify`](src/full_verify.rs) proves consistency **only** in the sense that the same `(pk, msg, sig)` is used to rebuild every trace.
+This does **not** by itself connect coefficient limbs to **full NTT** butterfly internals; [`full_verify`](src/full_verify.rs) still relies on separate [`FalconNttFullAir`](src/air/ntt_full.rs) proofs plus the dual-NTT **preprocessed NTT reference** equalities for the NTT-domain side.
 
 ## What has been done
 
@@ -149,20 +163,21 @@ This does **not** connect those coefficient limbs to the NTT values in the dual-
 
 | Piece | Role |
 |-------|------|
-| [`FalconDualNttEquationAir`](src/air/dual_ntt_equation.rs) | Per NTT index $i$, dual-NTT congruence mod $q$ (below). |
-| [`FalconCoeffDualProductZeroAir`](src/air/coeff_dual_product_zero.rs) | Coefficient domain: `sig_pos[i]·sig_neg[i]=0`. |
+| [`FalconDualNttEquationAir`](src/air/dual_ntt_equation.rs) | Per NTT index $i$: NTT limbs pinned to preprocessed refs; dual-NTT congruence mod $q$ (enumerated below). |
+| [`FalconCoeffDualProductZeroAir`](src/air/coeff_dual_product_zero.rs) | Coefficient domain: expected `sig_pos`/`sig_neg` in preprocessed columns; bits reconstruct and `sig_pos[i]·sig_neg[i]=0`. |
 | [`FalconL2BoundAir`](src/air/l2_bound.rs) | Coefficient domain: centered `m²` sum and `≤ SIG_L2_BOUND`. |
 | [`FalconNttLayerAir`](src/air/ntt_layer.rs) | One Cooley–Tukey layer (debug / per-layer tests). |
 | [`FalconNttFullAir`](src/air/ntt_full.rs) | All `LOG_N` layers for one limb in one proof. |
 
 **Per row $i$, [`FalconDualNttEquationAir`](src/air/dual_ntt_equation.rs) enforces:**
 
+0. **Preprocessed reference:** `sig_pos_ntt`, `sig_neg_ntt`, `v_pos_ntt`, `v_neg_ntt` in the main trace **equal** the four preprocessed columns (verifier-native NTT at index $i$ for those limbs).
 1. **`prod_sig_pos_pk = sig_pos_ntt · pk_ntt`** and **`prod_sig_neg_pk = sig_neg_ntt · pk_ntt`** with **KoalaBear multiplication** (sound because true products are $< q^2 < 2^{31}$).
 2. **`sum_left = hm_ntt + v_neg_ntt + prod_sig_neg_pk`** and **`sum_right = v_pos_ntt + prod_sig_pos_pk`** (integer sums in the same small range).
 3. **Euclidean division mod $q$** via `lhs_mod`, `quot_l` (bits), `rhs_mod`, `quot_r`: `sum_* - *_mod - quot_*·q = 0`, quotients **14-bit** booleans.
 4. **`lhs_mod = rhs_mod`**.
 
-This matches the **per-index congruence** in [`FalconDualNTTVerificationCircuit`](../falcon-r1cs/src/circuits/falcon_dual_ntt.rs). It does **not** by itself prove that `sig_*_ntt` / `v_*_ntt` are the NTT of the coefficient witness inside the **same** constraint system; that is what the separate [`FalconNttFullAir`](src/air/ntt_full.rs) proofs (and future linking) address.
+This matches the **per-index congruence** in [`FalconDualNTTVerificationCircuit`](../falcon-r1cs/src/circuits/falcon_dual_ntt.rs). The **full NTT** proofs still justify the butterfly pipeline separately; a single AIR that merges them with the dual-NTT trace is not implemented yet (see checklist).
 
 ## Field sizes: KoalaBear vs BLS12-381 `Fr`
 

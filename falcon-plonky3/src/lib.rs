@@ -8,6 +8,7 @@
 //!
 //! The [`FalconDualNttEquationAir`] enforces, per NTT index:
 //! - public periodic **`pk_ntt`**, **`hm_ntt`** (see [`air::dual_ntt_equation`](crate::air::dual_ntt_equation)),
+//! - **preprocessed** reference NTT limbs for `sig_pos`, `sig_neg`, `v_pos`, `v_neg` equal to the main trace’s first four columns,
 //! - `prod_sig_pos_pk = sig_pos_ntt * pk_ntt` and `prod_sig_neg_pk = sig_neg_ntt * pk_ntt` in KoalaBear
 //!   (sound because true products are $< q^2$ and below the KoalaBear prime),
 //! - `hm + v_neg + prod_sig_neg_pk = lhs_mod + quot_l * MODULUS` and the symmetric right side,
@@ -15,7 +16,8 @@
 //! - `lhs_mod == rhs_mod`.
 //!
 //! Coefficient-domain **dual limb disjointness** is proved separately by
-//! [`FalconCoeffDualProductZeroAir`] ([`build_falcon_coeff_dual_product_zero_trace`]).
+//! [`FalconCoeffDualProductZeroAir`] ([`build_falcon_coeff_dual_product_zero_instance`]); bit
+//! reconstructions are **equal** to preprocessed expected `sig_pos`, `sig_neg` coefficients.
 //!
 //! **NTT (per layer):** [`FalconNttLayerAir`] with [`build_ntt_layer_instance`] proves **one**
 //! Cooley–Tukey layer at a time (`layer ∈ [0, LOG_N)`), with a **preprocessed twiddle** column;
@@ -28,7 +30,7 @@
 //!
 //! **L² bound:** [`FalconL2BoundAir`] + [`build_falcon_l2_bound_trace`] (see [`full_verify`] bundle).
 //!
-//! Still **not** a single unified AIR like `falcon-r1cs` (cross-linking NTT outputs into the dual-NTT columns).
+//! Still **not** a single unified AIR like `falcon-r1cs` (no shared transcript between the four [`FalconNttFullAir`](src/air/ntt_full.rs) proofs and the dual-NTT proof). Dual-NTT NTT limbs and coeff-dual bits are **constrained** against verifier-rebuilt preprocessed references.
 
 pub mod air;
 pub mod config;
@@ -38,10 +40,12 @@ pub mod witness;
 pub use air::{
     butterfly_j_jht_s, state_through_ntt_layer, FalconCoeffDualProductZeroAir,
     FalconDualNttEquationAir, FalconL2BoundAir, FalconNttLayer0Air, FalconNttLayerAir,
-    NTT_LAYER_MAIN_COLS,
+    NTT_LAYER_MAIN_COLS, NUM_DUAL_NTT_PREPROCESSED_COLS,
 };
 pub use config::stark_config_poseidon2;
 pub use witness::{
+    build_falcon_coeff_dual_product_zero_instance,
+    build_falcon_coeff_dual_product_zero_preprocessed,
     build_falcon_coeff_dual_product_zero_trace, build_falcon_dual_ntt_instance,
     build_falcon_l2_bound_trace, build_ntt_layer0_trace, build_ntt_layer_instance,
     build_ntt_layer_main_trace,

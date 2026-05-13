@@ -8,10 +8,10 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use crate::air::{
     butterfly_j_jht_s, state_before_ntt_layer, ACCUM_BITS, BOUND_DIFF_BITS, COEFF_DUAL_ZERO_MAIN_COLS,
-    DELTA_Q_BITS, FalconNttLayerAir, L2_MAIN_COLS, NUM_MAIN_COLS, NTT_LAYER_MAIN_COLS, QUOT_BITS,
-    SLACK_BITS,
+    COEFF_DUAL_ZERO_PREPROCESSED_COLS, DELTA_Q_BITS, FalconNttLayerAir, L2_MAIN_COLS, NUM_MAIN_COLS,
+    NUM_DUAL_NTT_PREPROCESSED_COLS, NTT_LAYER_MAIN_COLS, QUOT_BITS, SLACK_BITS,
 };
-use crate::FalconDualNttEquationAir;
+use crate::{FalconCoeffDualProductZeroAir, FalconDualNttEquationAir};
 
 fn fe_u16(x: u16) -> KoalaBear {
     <KoalaBear as PrimeCharacteristicRing>::from_u32(u32::from(x))
@@ -67,6 +67,7 @@ pub fn build_falcon_dual_ntt_instance(
 
     let mut pk_ntt_vals = Vec::with_capacity(N);
     let mut hm_ntt_vals = Vec::with_capacity(N);
+    let mut ntt_ref_vals = Vec::with_capacity(N * NUM_DUAL_NTT_PREPROCESSED_COLS);
     let mut main_vals = Vec::with_capacity(N * NUM_MAIN_COLS);
     let q = u64::from(MODULUS);
     for i in 0..N {
@@ -97,6 +98,11 @@ pub fn build_falcon_dual_ntt_instance(
         pk_ntt_vals.push(fe_u16(pk_i));
         hm_ntt_vals.push(fe_u16(hm_ntt.coeff()[i]));
 
+        ntt_ref_vals.push(fe_u16(sp));
+        ntt_ref_vals.push(fe_u16(sn));
+        ntt_ref_vals.push(fe_u16(vp));
+        ntt_ref_vals.push(fe_u16(vn));
+
         main_vals.push(fe_u16(sp));
         main_vals.push(fe_u16(sn));
         main_vals.push(fe_u16(vp));
@@ -115,7 +121,8 @@ pub fn build_falcon_dual_ntt_instance(
     debug_assert_eq!(main_vals.len(), N * NUM_MAIN_COLS);
 
     let main = RowMajorMatrix::new(main_vals, NUM_MAIN_COLS);
-    let air = FalconDualNttEquationAir::new(pk_ntt_vals, hm_ntt_vals);
+    let ntt_ref = RowMajorMatrix::new(ntt_ref_vals, NUM_DUAL_NTT_PREPROCESSED_COLS);
+    let air = FalconDualNttEquationAir::new(pk_ntt_vals, hm_ntt_vals, ntt_ref);
     (air, main)
 }
 
@@ -199,9 +206,35 @@ pub fn build_falcon_l2_bound_trace(
     RowMajorMatrix::new(vals, L2_MAIN_COLS)
 }
 
+/// Preprocessed trace for [`crate::air::FalconCoeffDualProductZeroAir`]: expected `sig_pos`,
+/// `sig_neg` coefficients (KoalaBear-embedded) per row.
+pub fn build_falcon_coeff_dual_product_zero_preprocessed(sig: &Signature) -> RowMajorMatrix<KoalaBear> {
+    let sig_poly: DualPolynomial = sig.into();
+    let mut vals = Vec::with_capacity(N * COEFF_DUAL_ZERO_PREPROCESSED_COLS);
+    for i in 0..N {
+        let pos = sig_poly.pos.coeff()[i];
+        let neg = sig_poly.neg.coeff()[i];
+        debug_assert!(u32::from(pos) < (1u32 << QUOT_BITS));
+        debug_assert!(u32::from(neg) < (1u32 << QUOT_BITS));
+        vals.push(fe_u16(pos));
+        vals.push(fe_u16(neg));
+    }
+    RowMajorMatrix::new(vals, COEFF_DUAL_ZERO_PREPROCESSED_COLS)
+}
+
 /// Main trace for [`crate::air::FalconCoeffDualProductZeroAir`]: coefficient-domain `sig_pos`,
 /// `sig_neg` as 14 + 14 little-endian bit columns per [`crate::air::QUOT_BITS`].
 pub fn build_falcon_coeff_dual_product_zero_trace(sig: &Signature) -> RowMajorMatrix<KoalaBear> {
+    let (_, main) = build_falcon_coeff_dual_product_zero_instance(sig);
+    main
+}
+
+/// [`FalconCoeffDualProductZeroAir`] plus main trace, using verifier-rebuilt expected coefficients.
+pub fn build_falcon_coeff_dual_product_zero_instance(
+    sig: &Signature,
+) -> (FalconCoeffDualProductZeroAir, RowMajorMatrix<KoalaBear>) {
+    let prep = build_falcon_coeff_dual_product_zero_preprocessed(sig);
+    let air = FalconCoeffDualProductZeroAir::new(prep);
     let sig_poly: DualPolynomial = sig.into();
     let w = COEFF_DUAL_ZERO_MAIN_COLS;
     let mut vals = Vec::with_capacity(N * w);
@@ -218,7 +251,8 @@ pub fn build_falcon_coeff_dual_product_zero_trace(sig: &Signature) -> RowMajorMa
         }
     }
     debug_assert_eq!(vals.len(), N * w);
-    RowMajorMatrix::new(vals, w)
+    let main = RowMajorMatrix::new(vals, w);
+    (air, main)
 }
 
 /// Main trace for [`crate::air::FalconNttLayerAir`]: one row per butterfly at NTT layer `layer`.

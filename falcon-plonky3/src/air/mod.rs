@@ -6,9 +6,11 @@ mod ntt_layer;
 
 pub use coeff_dual_product_zero::{
     FalconCoeffDualProductZeroAir, NUM_MAIN_COLS as COEFF_DUAL_ZERO_MAIN_COLS,
+    NUM_PREPROCESSED_COLS as COEFF_DUAL_ZERO_PREPROCESSED_COLS,
 };
 pub use dual_ntt_equation::{
-    FalconDualNttEquationAir, NUM_DUAL_NTT_PERIODIC_COLUMNS, NUM_MAIN_COLS, QUOT_BITS,
+    FalconDualNttEquationAir, NUM_DUAL_NTT_PERIODIC_COLUMNS, NUM_DUAL_NTT_PREPROCESSED_COLS,
+    NUM_MAIN_COLS, QUOT_BITS,
 };
 pub use l2_bound::{
     FalconL2BoundAir, ACCUM_BITS, BOUND_DIFF_BITS, DELTA_Q_BITS, NUM_MAIN_COLS as L2_MAIN_COLS,

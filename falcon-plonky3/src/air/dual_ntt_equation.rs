@@ -14,6 +14,13 @@
 //! to the intended public polynomials instead of hiding them only inside a prover-chosen trace.
 //! The constraints **do not** prove `hm_ntt = NTT(HashToPoint(msg, nonce))`; they use whatever
 //! periodic `hm_ntt` the `Air` was constructed with (this crate’s verify path derives it in Rust).
+//!
+//! ## Preprocessed NTT references
+//!
+//! Four **preprocessed** columns per row fix the verifier’s reference NTT values for
+//! `sig_pos`, `sig_neg`, `v_pos`, `v_neg` at that index. The AIR requires the main trace’s
+//! first four columns to match them, so a prover cannot satisfy the congruence with unrelated
+//! NTT limbs while still passing verify under a verifier-rebuilt [`FalconDualNttEquationAir`].
 
 use core::borrow::Borrow;
 
@@ -23,6 +30,7 @@ use p3_air::{
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::Matrix;
 
 use falcon_rust::{MODULUS, N};
 
@@ -33,7 +41,30 @@ pub const QUOT_BITS: usize = 14;
 /// committed preprocessed trace.
 pub const NUM_DUAL_NTT_PERIODIC_COLUMNS: usize = 2;
 
+/// Preprocessed: expected NTT samples for `sig_pos`, `sig_neg`, `v_pos`, `v_neg` (KoalaBear
+/// embedding of residues mod `q`), height [`N`], one row per NTT index.
+pub const NUM_DUAL_NTT_PREPROCESSED_COLS: usize = 4;
+
 pub const NUM_MAIN_COLS: usize = 8 + 2 * QUOT_BITS;
+
+#[repr(C)]
+pub struct DualNttPreprocessedRow<F> {
+    pub exp_sig_pos_ntt: F,
+    pub exp_sig_neg_ntt: F,
+    pub exp_v_pos_ntt: F,
+    pub exp_v_neg_ntt: F,
+}
+
+impl<F> Borrow<DualNttPreprocessedRow<F>> for [F] {
+    fn borrow(&self) -> &DualNttPreprocessedRow<F> {
+        debug_assert_eq!(self.len(), NUM_DUAL_NTT_PREPROCESSED_COLS);
+        let (prefix, shorts, suffix) = unsafe { self.align_to::<DualNttPreprocessedRow<F>>() };
+        debug_assert!(prefix.is_empty());
+        debug_assert!(suffix.is_empty());
+        debug_assert_eq!(shorts.len(), 1);
+        &shorts[0]
+    }
+}
 
 #[repr(C)]
 pub struct MainRow<F> {
@@ -65,15 +96,37 @@ impl<F> Borrow<MainRow<F>> for [F] {
 pub struct FalconDualNttEquationAir {
     pk_ntt: Vec<KoalaBear>,
     hm_ntt: Vec<KoalaBear>,
+    /// Reference NTT values (`sig_pos`, `sig_neg`, `v_pos`, `v_neg`) per row; verifier- and
+    /// prover-built from the same `(pk, msg, sig)`.
+    ntt_ref: RowMajorMatrix<KoalaBear>,
 }
 
 impl FalconDualNttEquationAir {
     /// `pk_ntt` and `hm_ntt` must each have length [`N`](falcon_rust::N); they are exposed as
-    /// periodic columns for statement binding.
-    pub fn new(pk_ntt: Vec<KoalaBear>, hm_ntt: Vec<KoalaBear>) -> Self {
+    /// periodic columns for statement binding. `ntt_ref` must be `N ×`
+    /// [`NUM_DUAL_NTT_PREPROCESSED_COLS`] (expected NTT limbs per index).
+    pub fn new(
+        pk_ntt: Vec<KoalaBear>,
+        hm_ntt: Vec<KoalaBear>,
+        ntt_ref: RowMajorMatrix<KoalaBear>,
+    ) -> Self {
         assert_eq!(pk_ntt.len(), N, "pk_ntt length must be N");
         assert_eq!(hm_ntt.len(), N, "hm_ntt length must be N");
-        Self { pk_ntt, hm_ntt }
+        assert_eq!(
+            ntt_ref.height(),
+            N,
+            "ntt_ref height must be N (one row per NTT index)"
+        );
+        assert_eq!(
+            ntt_ref.width(),
+            NUM_DUAL_NTT_PREPROCESSED_COLS,
+            "ntt_ref width must be NUM_DUAL_NTT_PREPROCESSED_COLS"
+        );
+        Self {
+            pk_ntt,
+            hm_ntt,
+            ntt_ref,
+        }
     }
 }
 
@@ -83,11 +136,11 @@ impl BaseAir<KoalaBear> for FalconDualNttEquationAir {
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<KoalaBear>> {
-        None
+        Some(self.ntt_ref.clone())
     }
 
     fn preprocessed_width(&self) -> usize {
-        0
+        NUM_DUAL_NTT_PREPROCESSED_COLS
     }
 
     fn num_periodic_columns(&self) -> usize {
@@ -124,6 +177,16 @@ where
     let pk: AB::Expr = per[0].into();
     let hm: AB::Expr = per[1].into();
 
+    let (exp_sp, exp_sn, exp_vp, exp_vn) = {
+        let p: &DualNttPreprocessedRow<AB::Var> = b.preprocessed().current_slice().borrow();
+        (
+            p.exp_sig_pos_ntt,
+            p.exp_sig_neg_ntt,
+            p.exp_v_pos_ntt,
+            p.exp_v_neg_ntt,
+        )
+    };
+
     let main_win = b.main();
     let m: &MainRow<AB::Var> = main_win.current_slice().borrow();
 
@@ -131,6 +194,11 @@ where
     let sig_n = m.sig_neg_ntt;
     let v_p = m.v_pos_ntt;
     let v_n = m.v_neg_ntt;
+
+    b.assert_eq(sig_p, exp_sp);
+    b.assert_eq(sig_n, exp_sn);
+    b.assert_eq(v_p, exp_vp);
+    b.assert_eq(v_n, exp_vn);
     let lhs = m.lhs_mod;
     let rhs = m.rhs_mod;
     let prod_sp = m.prod_sig_pos_pk;

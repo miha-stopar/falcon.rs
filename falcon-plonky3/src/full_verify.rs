@@ -9,16 +9,17 @@
 //! - **Inputs:** [`verify_falcon_parsed_verify`] takes `pk`, `msg`, `sig`, and the bundle. It does
 //!   **not** take prover-supplied `pk_ntt` / `hm_ntt`; it rebuilds every `Air` from `(pk, msg, sig)`.
 //! - **Dual-NTT:** proves the mod-`q` congruence for the main trace **given** those periodic
-//!   tables. It does **not** re-prove hash-to-point; `hm_ntt` is whatever this crate computes from
-//!   `(pk, msg, sig)` when constructing [`crate::air::FalconDualNttEquationAir`].
-//! - **Composition:** the seven proofs are verified independently; consistency is “same `(pk, msg, sig)`”
-//!   for all rebuilds. See the crate **[`README.md`](../README.md#verifier-facing-statement-tier-1-trust-model)**
+//!   tables, and **equality** of the NTT limbs to verifier-rebuilt **preprocessed** references
+//!   (same construction as [`crate::witness::build_falcon_dual_ntt_instance`]).
+//! - **Composition:** the seven proofs use **separate** Fiat–Shamir transcripts; dual-NTT and coeff dual-zero additionally **pin** witness columns to verifier-rebuilt preprocessed data. See the crate **[`README.md`](../README.md#verifier-facing-statement-tier-1-trust-model)**
 //!   for the full trust-model table.
 //!
 //! ## What is covered
 //!
-//! 1. [`crate::air::dual_ntt_equation::FalconDualNttEquationAir`] — dual-NTT congruence mod `q`.
-//! 2. [`crate::air::coeff_dual_product_zero::FalconCoeffDualProductZeroAir`] — `sig_pos[i]·sig_neg[i]=0`.
+//! 1. [`crate::air::dual_ntt_equation::FalconDualNttEquationAir`] — dual-NTT congruence mod `q`, with
+//!    `sig_*_ntt` / `v_*_ntt` **equal** to verifier-rebuilt preprocessed NTT references.
+//! 2. [`crate::air::coeff_dual_product_zero::FalconCoeffDualProductZeroAir`] — `sig_pos[i]·sig_neg[i]=0`
+//!    with limbs tied to preprocessed expected coefficients from `sig`.
 //! 3. Four [`crate::air::ntt_full::FalconNttFullAir`] proofs — full forward NTT for `sig_pos`, `sig_neg`,
 //!    `v_pos`, `v_neg` coefficient polynomials (statement-bound inputs in preprocessed columns).
 //! 4. [`crate::air::l2_bound::FalconL2BoundAir`] — coefficient-domain L² accumulation vs
@@ -27,22 +28,21 @@
 //! Native [`falcon_rust::PublicKey::verify_parsed_sig`] is still used before proving to ensure a valid
 //! witness (hash / parsing); the L² STARK duplicates the norm bound in-circuit for transparency.
 
-use falcon_rust::{DualPolynomial, NTTPolynomial, Polynomial, PublicKey, Signature};
+use falcon_rust::{DualPolynomial, NTTPolynomial, Polynomial, PublicKey, Signature, N};
 
 use p3_matrix::Matrix;
 use p3_uni_stark::{
     prove, prove_with_preprocessed, setup_preprocessed, verify, verify_with_preprocessed,
-    StarkGenericConfig,
 };
 use p3_util::log2_strict_usize;
 
 use crate::air::{build_ntt_full_main, build_ntt_full_preprocessed, FalconNttFullAir};
 use crate::config::FalconStarkConfig;
 use crate::witness::{
-    build_falcon_coeff_dual_product_zero_trace, build_falcon_dual_ntt_instance,
+    build_falcon_coeff_dual_product_zero_instance, build_falcon_dual_ntt_instance,
     build_falcon_l2_bound_trace, build_ntt_layer_instance,
 };
-use crate::{FalconCoeffDualProductZeroAir, FalconL2BoundAir, stark_config_poseidon2};
+use crate::{FalconL2BoundAir, stark_config_poseidon2};
 
 /// Proof artifacts for one signature verification statement (all sub-proofs use the same [`FalconStarkConfig`]).
 ///
@@ -72,13 +72,23 @@ pub fn prove_falcon_parsed_verify(
     let config = stark_config_poseidon2();
 
     let (dual_air, dual_main) = build_falcon_dual_ntt_instance(pk, msg, sig);
-    let dual_ntt = prove(&config, &dual_air, dual_main, &[]);
-    assert!(verify(&config, &dual_air, &dual_ntt, &[]).is_ok());
+    let dual_deg = log2_strict_usize(dual_main.height());
+    let (dual_pp, dual_vk) = setup_preprocessed(&config, &dual_air, dual_deg).expect("dual_ntt setup");
+    debug_assert_eq!(dual_pp.degree_bits, dual_deg + config.is_zk());
+    let dual_ntt = prove_with_preprocessed(&config, &dual_air, dual_main, &[], Some(&dual_pp));
+    assert!(
+        verify_with_preprocessed(&config, &dual_air, &dual_ntt, &[], Some(&dual_vk)).is_ok()
+    );
 
-    let coeff_air = FalconCoeffDualProductZeroAir::new();
-    let coeff_main = build_falcon_coeff_dual_product_zero_trace(sig);
-    let coeff_dual_zero = prove(&config, &coeff_air, coeff_main, &[]);
-    assert!(verify(&config, &coeff_air, &coeff_dual_zero, &[]).is_ok());
+    let (coeff_air, coeff_main) = build_falcon_coeff_dual_product_zero_instance(sig);
+    let coeff_deg = log2_strict_usize(coeff_main.height());
+    let (coeff_pp, coeff_vk) =
+        setup_preprocessed(&config, &coeff_air, coeff_deg).expect("coeff_dual setup");
+    debug_assert_eq!(coeff_pp.degree_bits, coeff_deg + config.is_zk());
+    let coeff_dual_zero = prove_with_preprocessed(&config, &coeff_air, coeff_main, &[], Some(&coeff_pp));
+    assert!(
+        verify_with_preprocessed(&config, &coeff_air, &coeff_dual_zero, &[], Some(&coeff_vk)).is_ok()
+    );
 
     let l2_air = FalconL2BoundAir::new();
     let l2_main = build_falcon_l2_bound_trace(pk, msg, sig);
@@ -134,10 +144,14 @@ pub fn verify_falcon_parsed_verify(
     let config = stark_config_poseidon2();
 
     let (dual_air, _dual_main) = build_falcon_dual_ntt_instance(pk, msg, sig);
-    verify(&config, &dual_air, &bundle.dual_ntt, &[])?;
+    let dual_deg = log2_strict_usize(N);
+    let (_, dual_vk) = setup_preprocessed(&config, &dual_air, dual_deg).expect("dual_ntt setup");
+    verify_with_preprocessed(&config, &dual_air, &bundle.dual_ntt, &[], Some(&dual_vk))?;
 
-    let coeff_air = FalconCoeffDualProductZeroAir::new();
-    verify(&config, &coeff_air, &bundle.coeff_dual_zero, &[])?;
+    let (coeff_air, _coeff_main) = build_falcon_coeff_dual_product_zero_instance(sig);
+    let coeff_deg = log2_strict_usize(N);
+    let (_, coeff_vk) = setup_preprocessed(&config, &coeff_air, coeff_deg).expect("coeff_dual setup");
+    verify_with_preprocessed(&config, &coeff_air, &bundle.coeff_dual_zero, &[], Some(&coeff_vk))?;
 
     let l2_air = FalconL2BoundAir::new();
     verify(&config, &l2_air, &bundle.l2_bound, &[])?;

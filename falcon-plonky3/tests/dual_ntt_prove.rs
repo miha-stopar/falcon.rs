@@ -1,6 +1,8 @@
 use falcon_plonky3::{build_falcon_dual_ntt_instance, stark_config_poseidon2};
 use falcon_rust::KeyPair;
-use p3_uni_stark::{prove, verify};
+use p3_matrix::Matrix;
+use p3_uni_stark::{prove_with_preprocessed, setup_preprocessed, verify_with_preprocessed};
+use p3_util::log2_strict_usize;
 
 #[test]
 fn prove_and_verify_dual_ntt_equation() {
@@ -15,7 +17,9 @@ fn prove_and_verify_dual_ntt_equation() {
 
     let (air, main_trace) = build_falcon_dual_ntt_instance(&keypair.public_key, msg.as_ref(), &sig);
 
-    let proof = prove(&config, &air, main_trace, &[]);
+    let deg = log2_strict_usize(main_trace.height());
+    let (pp, vk) = setup_preprocessed(&config, &air, deg).unwrap();
+    let proof = prove_with_preprocessed(&config, &air, main_trace, &[], Some(&pp));
 
-    verify(&config, &air, &proof, &[]).expect("verification failed");
+    verify_with_preprocessed(&config, &air, &proof, &[], Some(&vk)).expect("verification failed");
 }

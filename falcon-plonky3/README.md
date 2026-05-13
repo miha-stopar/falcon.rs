@@ -20,9 +20,9 @@ This section is the **single place** that states what the bundle **cryptographic
 | L² | Coefficient-domain centered square sum and `≤ SIG_L2_BOUND` (see [`FalconL2BoundAir`](src/air/l2_bound.rs)). |
 | Four full NTTs | Forward NTT of the four polynomials derived from `(pk, msg, sig)` matches the preprocessed twiddle schedule for those polynomials. |
 
-**What is *not* proved inside the dual-NTT AIR**
+**Verifier assumption: `hm` and `hm_ntt`**
 
-- The dual-NTT constraints **do not** prove “`hm_ntt = NTT(HashToPoint(msg, nonce))`” as an internal computation. They treat `hm_ntt[i]` as **given** public periodic data for that `Air` instance. In this crate’s verify path, that data is **only** whatever the verifier computes from `(pk, msg, sig)` (same as the prover), so the **trust model** is: *the verifier trusts its own hash-to-point + NTT code path*, not a separate prover attestation for `hm_ntt`.
+- Falcon’s hash-to-point produces **`hm`** from `(message, nonce)`; **`hm_ntt`** is its forward NTT. This crate’s API is built so the **verifier recomputes** `hm` / `hm_ntt` (and embeds them as periodic columns) when constructing the dual-NTT `Air` from `(pk, msg, sig)`—the same path as proving. The dual-NTT AIR **does not** contain a hash-to-point gadget; that is an explicit **design choice**: soundness relies on the verifier trusting **its own** Falcon hash + NTT implementation, not on the prover supplying `hm_ntt`.
 
 **Cross-proof linking**
 
@@ -118,19 +118,14 @@ flowchart LR
 
 ## To tighten (statement binding)
 
-**Tier 1** (explicit statement for integrators) is the [Verifier-facing statement](#verifier-facing-statement-tier-1-trust-model) section above: same `(pk, msg, sig)`, verifier-rebuilt periodic tables, and clear split between “proved by STARK” vs “assumed via Rust hash/parse path.”
+**Tier 1** (explicit statement for integrators) is the [Verifier-facing statement](#verifier-facing-statement-tier-1-trust-model) section above: same `(pk, msg, sig)`, verifier-rebuilt periodic tables, preprocessed references where used, and a clear split between “proved by STARK” vs “assumed because the verifier re-runs Falcon logic in Rust” (including hash-to-point for `hm` / `hm_ntt`).
 
-The checklist below tracks **stronger than Tier 1** goals (self-contained proof object, minimal trusted verifier code, or full in-system hashing).
-
-`hm` is obtained from `(message, nonce)` by Falcon’s hash-to-point. With the current API, the **verifier recomputes** `hm` / `hm_ntt` in the clear when building the dual-NTT `Air`; the dual-NTT STARK does **not** contain a hash-to-point gadget. Optional future work is to bind **`hm_ntt`** to **`(message, nonce)`** inside the proof system if you need a transferable artifact without that out-of-band step.
-
-Checklist for a “complete” statement:
+Checklist (optional refinements beyond the current design):
 
 - [x] Bind `pk_ntt` and `hm_ntt` to the intended **public** values for the dual-NTT proof — done via **periodic columns** + shared [`FalconDualNttEquationAir`](src/air/dual_ntt_equation.rs) construction from `(pk, msg, sig)` in [`prove_falcon_parsed_verify`](src/full_verify.rs) / [`verify_falcon_parsed_verify`](src/full_verify.rs) (verifier does not trust prover-supplied periodic blobs).
 - [x] Bind dual-NTT **NTT-domain** witness columns (`sig_*_ntt`, `v_*_ntt`) to verifier-native NTT values — **preprocessed** four-column reference trace + equality constraints in [`FalconDualNttEquationAir`](src/air/dual_ntt_equation.rs) ([`build_falcon_dual_ntt_instance`](src/witness.rs)); prove/verify use `setup_preprocessed` / `prove_with_preprocessed` / `verify_with_preprocessed` for that sub-proof.
 - [x] Bind **coeff dual-zero** bit witness to expected **`sig_pos` / `sig_neg`** coefficients — **preprocessed** two-column reference + equality in [`FalconCoeffDualProductZeroAir`](src/air/coeff_dual_product_zero.rs) ([`build_falcon_coeff_dual_product_zero_instance`](src/witness.rs)).
-- [ ] Bind **`hm_ntt`** derivation to **`(message, nonce)`** *inside* the proof system (or fix a hash digest as a public input with a specified in-circuit / out-of-circuit split)—**beyond Tier 1**; today equality holds only because the verifier re-runs the same Rust derivation as proving.
-- [ ] **Single proof or explicit FS composition:** connect [`FalconNttFullAir`](src/air/ntt_full.rs) butterfly traces to the same PCS / transcript as the dual-NTT proof (today: independent proofs; consistency is same `(pk, msg, sig)` rebuild plus the preprocessed equalities above). Optionally link coeff dual-zero to **L²** / **full NTT** in one AIR.
+- [ ] **Single proof or explicit FS composition:** connect [`FalconNttFullAir`](src/air/ntt_full.rs) butterfly traces to the same PCS / transcript as the dual-NTT proof (today: independent proofs; consistency is same `(pk, msg, sig)` rebuild plus the preprocessed equalities above). Optionally unify with **L²** in one AIR.
 
 ## NTT one layer at a time (`FalconNttLayerAir`)
 

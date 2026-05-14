@@ -281,6 +281,10 @@ Dilithium will be implemented in this workspace as well; the bullets below are *
 - **Linear algebra mod \(q\):** matrix–vector products and additions in \(\mathbb{Z}_q\) are many bounded products and sums; on a **small** proof field you still need “no wrap” or limb logic wherever an intermediate can exceed the native prime.
 - **Scale:** parameter sets use larger structured matrices than a minimal Falcon instance—**trace width and row count** tend to grow, which hits prover time even when individual ops are simple.
 
+### R1CS / Groth16 (`falcon-r1cs`)
+
+Arkworks **R1CS constraint counts** (e.g. `ConstraintSystem::num_constraints()` for `FalconNTTVerificationCircuit`, `FalconDualNTTVerificationCircuit`, schoolbook verify) are documented in [`falcon-r1cs`](../falcon-r1cs/README.md) and in more detail in [`falcon-r1cs/docs/r1cs_constraints.md`](../falcon-r1cs/docs/r1cs_constraints.md). At Falcon-1024, NTT-based verification is on the order of **\(10^5\)** R1CS rows versus **on the order of \(10^6\)** primitive AIR identities for the seven-proof Plonky3 bundle here—the metrics are **not** interchangeable.
+
 ## Running tests
 
 ```bash

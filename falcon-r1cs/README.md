@@ -3,6 +3,8 @@ Falcon R1CS
 
 This crate generates the R1CS circuit for Falcon signature verifications.
 
+**R1CS sizes (Arkworks `num_constraints`, instance/witness split):** see [docs/r1cs_constraints.md](docs/r1cs_constraints.md) for definitions, how to reproduce counts, and Falcon-1024 / Falcon-512 tables (including the **dual-NTT** verifier line from `constraint_counts`).
+
 # Build
 
 To build for falcon-1024
@@ -18,39 +20,45 @@ cargo build [--release] --features=falcon-512 --no-default-features
 
 # Example
 
-`falcon-r1cs/example/pok_sig.rs` shows an example of how to generate a proof of knowledge
+`falcon-r1cs/examples/pok_sig.rs` shows an example of how to generate a proof of knowledge
 of the signature for Falcon. To run this example with Falcon-1024
 ```
-cargo run --release --example pok_sig
+cargo run --release -p falcon-r1cs --example pok_sig
 ```
 with Falcon-512
 ```
-cargo run --release --example pok_sig --no-default-features --features=falcon-512
+cargo run --release -p falcon-r1cs --example pok_sig --no-default-features --features=falcon-512
 ```
 
-# Performance
+# Performance (R1CS)
 
-The total #constraints for a single Falcon-1024 signature verification is listed
-below. The table can be obtained via
-```
-cargo run --release --example constraint_counts
-```
-|            | # instance variables |      # witness |      #constraints |
-|---|---:|---:|---:|
-ntt conversion|                      0 |          29696 |             30720 |
-verify with ntt|                  2049 |         156724 |            162870 |
-verify with schoolbook|           2049 |        1150004 |           1156150 |
+`ConstraintSystem::num_constraints()` counts **R1CS multiplication rows** over **`Fq`** (Ed-on-BLS12-381). See [docs/r1cs_constraints.md](docs/r1cs_constraints.md) for definitions, comparison to [`falcon-plonky3`](../falcon-plonky3), and how to record the **dual-NTT** row (third printed line of [`examples/constraint_counts.rs`](examples/constraint_counts.rs)).
 
-That for Falcon-512 can be obtained via
-```
-cargo run --release --example constraint_counts --no-default-features --features=falcon-512
+The tables below match the **first, second, and fourth** lines of `constraint_counts` when run from the **workspace root** (recommended):
+
+```bash
+cargo run --release -p falcon-r1cs --example constraint_counts
 ```
 
-|                 | # instance variables |      # witness |      #constraints |
-|---|---:|---:|---:|
-|ntt conversion|                      0 |          14848 |             15360 |
-|verify with ntt|                  1025 |          78386 |             81460 |
-|verify with schoolbook|           1025 |         312882 |            315956 |
+### Falcon-1024
+
+| | # instance variables | # witness | #constraints |
+|--|--:|--:|--:|
+| ntt conversion | 0 | 29 696 | 30 720 |
+| verify with ntt | 2 049 | 156 724 | 162 870 |
+| verify with schoolbook | 2 049 | 1 150 004 | 1 156 150 |
+
+### Falcon-512
+
+```bash
+cargo run --release -p falcon-r1cs --example constraint_counts --no-default-features --features=falcon-512
+```
+
+| | # instance variables | # witness | #constraints |
+|--|--:|--:|--:|
+| ntt conversion | 0 | 14 848 | 15 360 |
+| verify with ntt | 1 025 | 78 386 | 81 460 |
+| verify with schoolbook | 1 025 | 312 882 | 315 956 |
 
 
 

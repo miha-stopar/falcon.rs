@@ -1,9 +1,11 @@
 use falcon_plonky3::{
     build_falcon_l2_bound_preprocessed, build_falcon_l2_bound_trace, stark_config_poseidon2,
-    FalconL2BoundAir,
+    FalconL2BoundAir, StatementBoundAir,
 };
 use falcon_rust::KeyPair;
 use p3_air::check_constraints;
+use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::KoalaBear;
 use p3_matrix::Matrix;
 use p3_uni_stark::{prove_with_preprocessed, setup_preprocessed, verify_with_preprocessed};
 use p3_util::log2_strict_usize;
@@ -68,4 +70,35 @@ fn l2_trace_from_other_signature_is_rejected() {
 
     // `check_constraints` asserts on the first violated row (the `e == coeff_ref` binding).
     check_constraints(&air, &trace_b, &[]);
+}
+
+/// Statement-digest binding: a proof is tied to the `public_values` it was produced with.
+/// `StatementBoundAir` declares the digest length so the verifier observes it into the
+/// Fiat–Shamir transcript; verifying with a different digest must fail.
+#[test]
+fn proof_is_bound_to_statement_digest_public_values() {
+    let keypair = KeyPair::keygen();
+    let msg = b"digest binding";
+    let sig = keypair.secret_key.sign_with_seed(b"seed-digest", msg.as_ref());
+    assert!(keypair.public_key.verify_parsed_sig(msg.as_ref(), &sig));
+
+    let config = stark_config_poseidon2();
+    let prep = build_falcon_l2_bound_preprocessed(&keypair.public_key, msg.as_ref(), &sig);
+    let air = StatementBoundAir::new(FalconL2BoundAir::new(prep), 8);
+    let trace = build_falcon_l2_bound_trace(&keypair.public_key, msg.as_ref(), &sig);
+    let deg = log2_strict_usize(trace.height());
+    let (pp, vk) = setup_preprocessed(&config, &air, deg).expect("l2 setup");
+
+    let digest_a: [KoalaBear; 8] = core::array::from_fn(|i| KoalaBear::from_u32(i as u32 + 1));
+    let digest_b: [KoalaBear; 8] = core::array::from_fn(|i| KoalaBear::from_u32(i as u32 + 100));
+
+    let proof = prove_with_preprocessed(&config, &air, trace, &digest_a, Some(&pp));
+    assert!(
+        verify_with_preprocessed(&config, &air, &proof, &digest_a, Some(&vk)).is_ok(),
+        "verifying with the proving digest must succeed"
+    );
+    assert!(
+        verify_with_preprocessed(&config, &air, &proof, &digest_b, Some(&vk)).is_err(),
+        "verifying with a different digest must fail (transcript binding)"
+    );
 }

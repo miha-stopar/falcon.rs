@@ -3,6 +3,7 @@ mod dual_ntt_equation;
 mod l2_bound;
 mod ntt_full;
 mod ntt_layer;
+mod statement_bound;
 pub mod unified_parsed_verify;
 
 pub use coeff_dual_product_zero::{
@@ -23,6 +24,7 @@ pub use ntt_full::{
     NUM_PREPROCESSED_COLS as NTT_FULL_PREPROCESSED_COLS,
     ntt_full_real_rows, ntt_full_trace_height,
 };
+pub use statement_bound::StatementBoundAir;
 pub use unified_parsed_verify::{
     FalconUnifiedParsedVerifyAir, unified_body_rows, unified_trace_height,
 };

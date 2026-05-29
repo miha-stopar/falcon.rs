@@ -11,8 +11,12 @@
 //! - **Dual-NTT:** proves the mod-`q` congruence for the main trace **given** those periodic
 //!   tables, and **equality** of the NTT limbs to verifier-rebuilt **preprocessed** references
 //!   (same construction as [`crate::witness::build_falcon_dual_ntt_instance`]).
-//! - **Composition:** the seven proofs use **separate** Fiat–Shamir transcripts; dual-NTT and coeff dual-zero additionally **pin** witness columns to verifier-rebuilt preprocessed data. See the crate **[`README.md`](../README.md#verifier-facing-statement)**
-//!   for the full trust-model table.
+//! - **Composition:** the seven proofs use **separate** Fiat–Shamir transcripts, but each transcript
+//!   is bound to a common **statement digest** ([`falcon_statement_digest`]) supplied as
+//!   `public_values` via [`StatementBoundAir`], so the bundle is tied to one `(pk, msg, sig)` and the
+//!   sub-proofs cannot be mixed across statements. Dual-NTT, coeff dual-zero, and L² additionally
+//!   **pin** witness columns to verifier-rebuilt preprocessed data. See the crate
+//!   **[`README.md`](../README.md#verifier-facing-statement)** for the full trust-model table.
 //!
 //! ## What is covered
 //!
@@ -38,13 +42,18 @@ use std::time::{Duration, Instant};
 
 use falcon_rust::{DualPolynomial, NTTPolynomial, Polynomial, PublicKey, Signature, N};
 
+use p3_field::PrimeCharacteristicRing;
+use p3_koala_bear::{default_koalabear_poseidon2_16, KoalaBear, Poseidon2KoalaBear};
 use p3_matrix::Matrix;
+use p3_symmetric::{CryptographicHasher, PaddingFreeSponge};
 use p3_uni_stark::{
     prove_with_preprocessed, setup_preprocessed, verify_with_preprocessed, StarkGenericConfig,
 };
 use p3_util::log2_strict_usize;
 
-use crate::air::{build_ntt_full_main, build_ntt_full_preprocessed, FalconNttFullAir};
+use crate::air::{
+    build_ntt_full_main, build_ntt_full_preprocessed, FalconNttFullAir, StatementBoundAir,
+};
 use crate::config::FalconStarkConfig;
 use crate::air::unified_trace_height;
 use crate::witness::{
@@ -54,6 +63,41 @@ use crate::witness::{
     build_ntt_layer_instance,
 };
 use crate::{FalconL2BoundAir, stark_config_poseidon2};
+
+/// Number of [`KoalaBear`] elements in a Falcon statement digest (Poseidon2 sponge output).
+pub const FALCON_STATEMENT_DIGEST_LEN: usize = 8;
+
+/// Deterministic digest of the statement `(pk, msg, sig)` as field elements.
+///
+/// Bound into every sub-proof's Fiat–Shamir transcript via `public_values` (see
+/// [`StatementBoundAir`]), so the seven proofs are explicitly tied to **one** statement and to each
+/// other — not only implicitly via the verifier rebuilding each AIR. Prover and verifier compute it
+/// identically from `(pk, msg, sig)`. It is observed into the transcript, not constrained in-circuit.
+pub fn falcon_statement_digest(
+    pk: &PublicKey,
+    msg: &[u8],
+    sig: &Signature,
+) -> [KoalaBear; FALCON_STATEMENT_DIGEST_LEN] {
+    let pk_poly: Polynomial = pk.into();
+    let sig_poly: DualPolynomial = sig.into();
+    let hm = Polynomial::from_hash_of_message(msg, sig.nonce());
+
+    let fe = |x: u32| KoalaBear::from_u32(x);
+    let mut input: Vec<KoalaBear> = Vec::new();
+    // Domain separation + lengths, then the full statement (pk, msg, sig coeffs, and hm = H(msg, nonce)).
+    input.push(fe(0x4641_4C32)); // "FAL2"
+    input.push(fe(N as u32));
+    input.push(fe(msg.len() as u32));
+    input.extend(msg.iter().map(|&b| fe(u32::from(b))));
+    input.extend(pk_poly.coeff().iter().map(|&c| fe(u32::from(c))));
+    input.extend(sig_poly.pos.coeff().iter().map(|&c| fe(u32::from(c))));
+    input.extend(sig_poly.neg.coeff().iter().map(|&c| fe(u32::from(c))));
+    input.extend(hm.coeff().iter().map(|&c| fe(u32::from(c))));
+
+    let perm = default_koalabear_poseidon2_16();
+    let hasher = PaddingFreeSponge::<Poseidon2KoalaBear<16>, 16, 8, 8>::new(perm);
+    hasher.hash_iter(input)
+}
 
 /// Proof artifacts for one signature verification statement (all sub-proofs use the same [`FalconStarkConfig`]).
 ///
@@ -93,34 +137,39 @@ pub fn prove_falcon_parsed_verify(
     );
 
     let config = stark_config_poseidon2();
+    let digest = falcon_statement_digest(pk, msg, sig);
 
     let (dual_air, dual_main) = build_falcon_dual_ntt_instance(pk, msg, sig);
+    let dual_air = StatementBoundAir::new(dual_air, FALCON_STATEMENT_DIGEST_LEN);
     let dual_deg = log2_strict_usize(dual_main.height());
     let (dual_pp, dual_vk) = setup_preprocessed(&config, &dual_air, dual_deg).expect("dual_ntt setup");
     debug_assert_eq!(dual_pp.degree_bits, dual_deg + config.is_zk());
-    let dual_ntt = prove_with_preprocessed(&config, &dual_air, dual_main, &[], Some(&dual_pp));
+    let dual_ntt = prove_with_preprocessed(&config, &dual_air, dual_main, &digest, Some(&dual_pp));
     assert!(
-        verify_with_preprocessed(&config, &dual_air, &dual_ntt, &[], Some(&dual_vk)).is_ok()
+        verify_with_preprocessed(&config, &dual_air, &dual_ntt, &digest, Some(&dual_vk)).is_ok()
     );
 
     let (coeff_air, coeff_main) = build_falcon_coeff_dual_product_zero_instance(sig);
+    let coeff_air = StatementBoundAir::new(coeff_air, FALCON_STATEMENT_DIGEST_LEN);
     let coeff_deg = log2_strict_usize(coeff_main.height());
     let (coeff_pp, coeff_vk) =
         setup_preprocessed(&config, &coeff_air, coeff_deg).expect("coeff_dual setup");
     debug_assert_eq!(coeff_pp.degree_bits, coeff_deg + config.is_zk());
-    let coeff_dual_zero = prove_with_preprocessed(&config, &coeff_air, coeff_main, &[], Some(&coeff_pp));
+    let coeff_dual_zero =
+        prove_with_preprocessed(&config, &coeff_air, coeff_main, &digest, Some(&coeff_pp));
     assert!(
-        verify_with_preprocessed(&config, &coeff_air, &coeff_dual_zero, &[], Some(&coeff_vk)).is_ok()
+        verify_with_preprocessed(&config, &coeff_air, &coeff_dual_zero, &digest, Some(&coeff_vk))
+            .is_ok()
     );
 
     let l2_prep = build_falcon_l2_bound_preprocessed(pk, msg, sig);
-    let l2_air = FalconL2BoundAir::new(l2_prep);
+    let l2_air = StatementBoundAir::new(FalconL2BoundAir::new(l2_prep), FALCON_STATEMENT_DIGEST_LEN);
     let l2_main = build_falcon_l2_bound_trace(pk, msg, sig);
     let l2_deg = log2_strict_usize(l2_main.height());
     let (l2_pp, l2_vk) = setup_preprocessed(&config, &l2_air, l2_deg).expect("l2_bound setup");
     debug_assert_eq!(l2_pp.degree_bits, l2_deg + config.is_zk());
-    let l2_bound = prove_with_preprocessed(&config, &l2_air, l2_main, &[], Some(&l2_pp));
-    assert!(verify_with_preprocessed(&config, &l2_air, &l2_bound, &[], Some(&l2_vk)).is_ok());
+    let l2_bound = prove_with_preprocessed(&config, &l2_air, l2_main, &digest, Some(&l2_pp));
+    assert!(verify_with_preprocessed(&config, &l2_air, &l2_bound, &digest, Some(&l2_vk)).is_ok());
 
     let sig_poly: DualPolynomial = sig.into();
     let pk_poly: Polynomial = pk.into();
@@ -133,12 +182,12 @@ pub fn prove_falcon_parsed_verify(
     let prove_full_ntt = |poly: &Polynomial| {
         let prep = build_ntt_full_preprocessed(poly);
         let main = build_ntt_full_main(poly);
-        let air = FalconNttFullAir::new(prep.clone());
+        let air = StatementBoundAir::new(FalconNttFullAir::new(prep.clone()), FALCON_STATEMENT_DIGEST_LEN);
         let deg = log2_strict_usize(main.height());
         let (pp, vk) = setup_preprocessed(&config, &air, deg).expect("ntt_full setup");
         debug_assert_eq!(pp.degree_bits, deg + config.is_zk());
-        let proof = prove_with_preprocessed(&config, &air, main, &[], Some(&pp));
-        assert!(verify_with_preprocessed(&config, &air, &proof, &[], Some(&vk)).is_ok());
+        let proof = prove_with_preprocessed(&config, &air, main, &digest, Some(&pp));
+        assert!(verify_with_preprocessed(&config, &air, &proof, &digest, Some(&vk)).is_ok());
         proof
     };
 
@@ -232,43 +281,48 @@ fn verify_falcon_parsed_verify_parallel(
     let uh_neg = sig_poly.neg * pk_poly;
     let v = hm - uh_pos + uh_neg;
     let v_dual = DualPolynomial::from(&v);
+    let digest = falcon_statement_digest(pk, msg, sig);
 
     type VerErr = p3_uni_stark::VerificationError<p3_uni_stark::PcsError<FalconStarkConfig>>;
 
     std::thread::scope(|s| {
-        let h1 = s.spawn(|| {
+        let digest = &digest;
+        let h1 = s.spawn(move || {
             let config = stark_config_poseidon2();
             let (dual_air, _) = build_falcon_dual_ntt_instance(pk, msg, sig);
+            let dual_air = StatementBoundAir::new(dual_air, FALCON_STATEMENT_DIGEST_LEN);
             let (_, dual_vk) =
                 setup_preprocessed(&config, &dual_air, log2_strict_usize(N)).expect("dual_ntt setup");
-            verify_with_preprocessed(&config, &dual_air, &bundle.dual_ntt, &[], Some(&dual_vk))
+            verify_with_preprocessed(&config, &dual_air, &bundle.dual_ntt, digest, Some(&dual_vk))
         });
-        let h2 = s.spawn(|| {
+        let h2 = s.spawn(move || {
             let config = stark_config_poseidon2();
             let (coeff_air, _) = build_falcon_coeff_dual_product_zero_instance(sig);
+            let coeff_air = StatementBoundAir::new(coeff_air, FALCON_STATEMENT_DIGEST_LEN);
             let (_, coeff_vk) =
                 setup_preprocessed(&config, &coeff_air, log2_strict_usize(N)).expect("coeff_dual setup");
-            verify_with_preprocessed(&config, &coeff_air, &bundle.coeff_dual_zero, &[], Some(&coeff_vk))
+            verify_with_preprocessed(&config, &coeff_air, &bundle.coeff_dual_zero, digest, Some(&coeff_vk))
         });
-        let h3 = s.spawn(|| {
+        let h3 = s.spawn(move || {
             let config = stark_config_poseidon2();
             let l2_prep = build_falcon_l2_bound_preprocessed(pk, msg, sig);
-            let l2_air = FalconL2BoundAir::new(l2_prep);
+            let l2_air =
+                StatementBoundAir::new(FalconL2BoundAir::new(l2_prep), FALCON_STATEMENT_DIGEST_LEN);
             let (_, l2_vk) = setup_preprocessed(&config, &l2_air, log2_strict_usize(4 * N))
                 .expect("l2_bound setup");
-            verify_with_preprocessed(&config, &l2_air, &bundle.l2_bound, &[], Some(&l2_vk))
+            verify_with_preprocessed(&config, &l2_air, &bundle.l2_bound, digest, Some(&l2_vk))
         });
-        let h4 = s.spawn(|| {
-            verify_ntt_full_subproof(&sig_poly.pos, &bundle.ntt_sig_pos)
+        let h4 = s.spawn(move || {
+            verify_ntt_full_subproof(&sig_poly.pos, &bundle.ntt_sig_pos, digest)
         });
-        let h5 = s.spawn(|| {
-            verify_ntt_full_subproof(&sig_poly.neg, &bundle.ntt_sig_neg)
+        let h5 = s.spawn(move || {
+            verify_ntt_full_subproof(&sig_poly.neg, &bundle.ntt_sig_neg, digest)
         });
-        let h6 = s.spawn(|| {
-            verify_ntt_full_subproof(&v_dual.pos, &bundle.ntt_v_pos)
+        let h6 = s.spawn(move || {
+            verify_ntt_full_subproof(&v_dual.pos, &bundle.ntt_v_pos, digest)
         });
-        let h7 = s.spawn(|| {
-            verify_ntt_full_subproof(&v_dual.neg, &bundle.ntt_v_neg)
+        let h7 = s.spawn(move || {
+            verify_ntt_full_subproof(&v_dual.neg, &bundle.ntt_v_neg, digest)
         });
 
         let mut first_err: Option<VerErr> = None;
@@ -292,14 +346,15 @@ fn verify_falcon_parsed_verify_parallel(
 fn verify_ntt_full_subproof(
     poly: &Polynomial,
     proof: &p3_uni_stark::Proof<FalconStarkConfig>,
+    digest: &[KoalaBear],
 ) -> Result<(), p3_uni_stark::VerificationError<p3_uni_stark::PcsError<FalconStarkConfig>>> {
     let config = stark_config_poseidon2();
     let prep = build_ntt_full_preprocessed(poly);
     let main = build_ntt_full_main(poly);
-    let air = FalconNttFullAir::new(prep);
+    let air = StatementBoundAir::new(FalconNttFullAir::new(prep), FALCON_STATEMENT_DIGEST_LEN);
     let deg = log2_strict_usize(main.height());
     let (_, vk) = setup_preprocessed(&config, &air, deg).expect("ntt_full setup");
-    verify_with_preprocessed(&config, &air, proof, &[], Some(&vk))
+    verify_with_preprocessed(&config, &air, proof, digest, Some(&vk))
 }
 
 /// Same as [`verify_falcon_parsed_verify`], but returns how much time was spent in instance/key prep vs STARK verification.
@@ -318,36 +373,39 @@ pub fn verify_falcon_parsed_verify_with_breakdown(
     let mut instance_prep = Duration::ZERO;
     let mut stark_crypto_verify = Duration::ZERO;
     let config = stark_config_poseidon2();
+    let digest = falcon_statement_digest(pk, msg, sig);
 
     let t0 = Instant::now();
     let (dual_air, _dual_main) = build_falcon_dual_ntt_instance(pk, msg, sig);
+    let dual_air = StatementBoundAir::new(dual_air, FALCON_STATEMENT_DIGEST_LEN);
     let dual_deg = log2_strict_usize(N);
     let (_, dual_vk) = setup_preprocessed(&config, &dual_air, dual_deg).expect("dual_ntt setup");
     instance_prep += t0.elapsed();
 
     let t0 = Instant::now();
-    verify_with_preprocessed(&config, &dual_air, &bundle.dual_ntt, &[], Some(&dual_vk))?;
+    verify_with_preprocessed(&config, &dual_air, &bundle.dual_ntt, &digest, Some(&dual_vk))?;
     stark_crypto_verify += t0.elapsed();
 
     let t0 = Instant::now();
     let (coeff_air, _coeff_main) = build_falcon_coeff_dual_product_zero_instance(sig);
+    let coeff_air = StatementBoundAir::new(coeff_air, FALCON_STATEMENT_DIGEST_LEN);
     let coeff_deg = log2_strict_usize(N);
     let (_, coeff_vk) = setup_preprocessed(&config, &coeff_air, coeff_deg).expect("coeff_dual setup");
     instance_prep += t0.elapsed();
 
     let t0 = Instant::now();
-    verify_with_preprocessed(&config, &coeff_air, &bundle.coeff_dual_zero, &[], Some(&coeff_vk))?;
+    verify_with_preprocessed(&config, &coeff_air, &bundle.coeff_dual_zero, &digest, Some(&coeff_vk))?;
     stark_crypto_verify += t0.elapsed();
 
     let t0 = Instant::now();
     let l2_prep = build_falcon_l2_bound_preprocessed(pk, msg, sig);
-    let l2_air = FalconL2BoundAir::new(l2_prep);
+    let l2_air = StatementBoundAir::new(FalconL2BoundAir::new(l2_prep), FALCON_STATEMENT_DIGEST_LEN);
     let (_, l2_vk) =
         setup_preprocessed(&config, &l2_air, log2_strict_usize(4 * N)).expect("l2_bound setup");
     instance_prep += t0.elapsed();
 
     let t0 = Instant::now();
-    verify_with_preprocessed(&config, &l2_air, &bundle.l2_bound, &[], Some(&l2_vk))?;
+    verify_with_preprocessed(&config, &l2_air, &bundle.l2_bound, &digest, Some(&l2_vk))?;
     stark_crypto_verify += t0.elapsed();
 
     let t0 = Instant::now();
@@ -368,13 +426,13 @@ pub fn verify_falcon_parsed_verify_with_breakdown(
         let t0 = Instant::now();
         let prep = build_ntt_full_preprocessed(poly);
         let main = build_ntt_full_main(poly);
-        let air = FalconNttFullAir::new(prep);
+        let air = StatementBoundAir::new(FalconNttFullAir::new(prep), FALCON_STATEMENT_DIGEST_LEN);
         let deg = log2_strict_usize(main.height());
         let (_, vk) = setup_preprocessed(&config, &air, deg).expect("ntt_full setup");
         *instance_prep += t0.elapsed();
 
         let t0 = Instant::now();
-        verify_with_preprocessed(&config, &air, proof, &[], Some(&vk))?;
+        verify_with_preprocessed(&config, &air, proof, &digest, Some(&vk))?;
         *stark_crypto_verify += t0.elapsed();
         Ok(())
     };

@@ -47,8 +47,8 @@ pub mod witness;
 pub use air::{
     butterfly_j_jht_s, state_through_ntt_layer, FalconCoeffDualProductZeroAir,
     FalconDualNttEquationAir, FalconL2BoundAir, FalconNttLayer0Air, FalconNttLayerAir,
-    FalconUnifiedParsedVerifyAir, NTT_LAYER_MAIN_COLS, NUM_DUAL_NTT_PREPROCESSED_COLS,
-    unified_trace_height,
+    FalconUnifiedParsedVerifyAir, StatementBoundAir, NTT_LAYER_MAIN_COLS,
+    NUM_DUAL_NTT_PREPROCESSED_COLS, unified_trace_height,
 };
 pub use config::stark_config_poseidon2;
 pub use witness::{
@@ -61,8 +61,8 @@ pub use witness::{
     build_ntt_layer_main_trace,
 };
 pub use full_verify::{
-    prove_falcon_ntt_layers_only, prove_falcon_parsed_verify,
+    falcon_statement_digest, prove_falcon_ntt_layers_only, prove_falcon_parsed_verify,
     prove_falcon_parsed_verify_single_stark, verify_falcon_parsed_verify,
     verify_falcon_parsed_verify_single_stark, verify_falcon_parsed_verify_with_breakdown,
-    FalconParsedVerifyVerifierBreakdown, FalconVerifyStarkBundle,
+    FalconParsedVerifyVerifierBreakdown, FalconVerifyStarkBundle, FALCON_STATEMENT_DIGEST_LEN,
 };

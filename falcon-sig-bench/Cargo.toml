@@ -1,0 +1,24 @@
+[package]
+name = "falcon-sig-bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "sig_proof_compare"
+path = "src/main.rs"
+
+[dependencies]
+falcon-rust = { path = "../falcon-rust" }
+falcon-plonk = { path = "../falcon-plonk" }
+falcon-r1cs = { path = "../falcon-r1cs" }
+falcon-plonky3 = { path = "../falcon-plonky3" }
+
+ark-bls12-381 = "0.3.0"
+ark-ed-on-bls12-381 = "0.3.0"
+ark-ff = "0.3.0"
+ark-groth16 = "0.3.0"
+ark-snark = "0.3.0"
+ark-std = "0.3.0"
+jf-plonk = { git = "https://github.com/EspressoSystems/jellyfish", features = ["std"] }
+rand_chacha = "0.3"

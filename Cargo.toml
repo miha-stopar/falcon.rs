@@ -6,6 +6,12 @@ members = [
     "falcon-plonk",
     "falcon-plonky3",
     "falcon-rust",
+    "falcon-sig-bench",
     "mldsa-plonky3",
 ]
 resolver = "2"
+
+# ahash 0.7.6's build script enables `stdsimd` on nightly, which references the
+# removed `stdsimd` language feature (E0635). Patch build.rs locally (same semver).
+[patch.crates-io]
+ahash = { path = "patches/ahash-0.7.6-patched" }

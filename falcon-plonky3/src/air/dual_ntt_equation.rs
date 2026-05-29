@@ -128,6 +128,18 @@ impl FalconDualNttEquationAir {
             ntt_ref,
         }
     }
+
+    pub fn pk_ntt_values(&self) -> &[KoalaBear] {
+        &self.pk_ntt
+    }
+
+    pub fn hm_ntt_values(&self) -> &[KoalaBear] {
+        &self.hm_ntt
+    }
+
+    pub fn ntt_ref(&self) -> &RowMajorMatrix<KoalaBear> {
+        &self.ntt_ref
+    }
 }
 
 impl BaseAir<KoalaBear> for FalconDualNttEquationAir {

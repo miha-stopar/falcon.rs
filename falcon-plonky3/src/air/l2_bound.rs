@@ -14,10 +14,15 @@ use core::borrow::Borrow;
 use p3_air::{Air, AirBuilder, BaseAir, FilteredAirBuilder, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
+use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::Matrix;
 
-use falcon_rust::{MODULUS, MODULUS_MINUS_1_OVER_TWO, SIG_L2_BOUND};
+use falcon_rust::{MODULUS, MODULUS_MINUS_1_OVER_TWO, N, SIG_L2_BOUND};
 
 use super::dual_ntt_equation::QUOT_BITS;
+
+/// Preprocessed columns: verifier-rebuilt expected coefficient magnitude `e` per row.
+pub const NUM_PREPROCESSED_COLS: usize = 1;
 
 /// Bits for `delta_q` in `e + delta_q = q - 1` (proves `e ≤ q - 1`).
 pub const DELTA_Q_BITS: usize = QUOT_BITS;
@@ -32,7 +37,7 @@ pub const NUM_MAIN_COLS: usize =
     QUOT_BITS + DELTA_Q_BITS + 1 + SLACK_BITS + ACCUM_BITS + BOUND_DIFF_BITS;
 
 const Q_MINUS_1_U32: u32 = MODULUS as u32 - 1;
-const SIG_BOUND_U32: u32 = SIG_L2_BOUND as u32;
+pub(crate) const SIG_BOUND_U32: u32 = SIG_L2_BOUND as u32;
 
 #[repr(C)]
 pub struct MainRow<F> {
@@ -55,16 +60,34 @@ impl<F> Borrow<MainRow<F>> for [F] {
     }
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct FalconL2BoundAir;
+#[derive(Clone, Debug)]
+pub struct FalconL2BoundAir {
+    /// Verifier-rebuilt expected coefficient `e` per row (`4N × 1`). Binds the L² witness to the
+    /// actual `sig`/`v` coefficients of the statement, so a prover cannot satisfy the norm bound
+    /// with unrelated (e.g. all-zero) coefficients.
+    coeff_ref: RowMajorMatrix<KoalaBear>,
+}
 
 impl BaseAir<KoalaBear> for FalconL2BoundAir {
     fn width(&self) -> usize {
         NUM_MAIN_COLS
     }
 
+    fn preprocessed_trace(&self) -> Option<RowMajorMatrix<KoalaBear>> {
+        Some(self.coeff_ref.clone())
+    }
+
+    fn preprocessed_width(&self) -> usize {
+        NUM_PREPROCESSED_COLS
+    }
+
     fn main_next_row_columns(&self) -> Vec<usize> {
         (0..NUM_MAIN_COLS).collect()
+    }
+
+    fn preprocessed_next_row_columns(&self) -> Vec<usize> {
+        // Only the current row's reference coefficient is used.
+        Vec::new()
     }
 
     fn max_constraint_degree(&self) -> Option<usize> {
@@ -82,7 +105,7 @@ fn bits_to_expr<AB: AirBuilder<F = KoalaBear>>(bits: &[AB::Var]) -> AB::Expr {
     acc
 }
 
-fn falcon_l2_contrib<AB: AirBuilder<F = KoalaBear>>(cur: &MainRow<AB::Var>) -> AB::Expr {
+pub(crate) fn falcon_l2_contrib<AB: AirBuilder<F = KoalaBear>>(cur: &MainRow<AB::Var>) -> AB::Expr {
     let e = bits_to_expr::<AB>(&cur.coeff_bits);
     let is_h: AB::Expr = cur.is_high.into();
     let q_embed: AB::Expr = KoalaBear::from_u32(MODULUS as u32).into();
@@ -104,7 +127,13 @@ fn eval_common_shared<AB: AirBuilder<F = KoalaBear>>(builder: &mut AB) {
     builder.assert_bools(cur.accum_bits);
     builder.assert_bools(cur.bound_diff_bits);
 
+    // Bind the reconstructed coefficient `e` to the verifier-rebuilt reference (preprocessed),
+    // so the squared-norm accumulation is over the *actual* `sig`/`v` coefficients.
+    let coeff_ref = builder.preprocessed().current_slice()[0];
+
     let e = bits_to_expr::<AB>(&cur.coeff_bits);
+    builder.assert_zero(e.clone() - coeff_ref.into());
+
     let delta_q = bits_to_expr::<AB>(&cur.delta_q_bits);
     let qm1: AB::Expr = KoalaBear::from_u32(Q_MINUS_1_U32).into();
     builder.assert_zero(e.clone() + delta_q - qm1);
@@ -170,7 +199,23 @@ impl<AB: AirBuilder<F = KoalaBear>> Air<AB> for FalconL2BoundAir {
 }
 
 impl FalconL2BoundAir {
-    pub fn new() -> Self {
-        Self
+    /// `coeff_ref` must be `4N × `[`NUM_PREPROCESSED_COLS`]: the verifier-rebuilt expected
+    /// coefficient `e` per row, in the row order `sig_pos`, `sig_neg`, `v_pos`, `v_neg`.
+    pub fn new(coeff_ref: RowMajorMatrix<KoalaBear>) -> Self {
+        assert_eq!(
+            coeff_ref.width(),
+            NUM_PREPROCESSED_COLS,
+            "coeff_ref width must be NUM_PREPROCESSED_COLS"
+        );
+        assert_eq!(
+            coeff_ref.height(),
+            4 * N,
+            "coeff_ref height must be 4*N (one row per accumulated coefficient)"
+        );
+        Self { coeff_ref }
+    }
+
+    pub fn coeff_ref(&self) -> &RowMajorMatrix<KoalaBear> {
+        &self.coeff_ref
     }
 }

@@ -31,3 +31,9 @@ rand_core = "0.6.3"
 default = ["falcon-1024"]
 falcon-512 = ["falcon-rust/falcon-512"]
 falcon-1024 = ["falcon-rust/falcon-1024"]
+# Debug: omit dual/coeff/full-NTT transition constraints in [`air::unified_parsed_verify`] (segment validity kept).
+unified-strip-stack-trans = []
+# Debug: omit transition-row segment one-hot + stacked sub-AIR block entirely.
+unified-strip-segment-trans = []
+# Debug: omit last-row NTT block ([`eval_ntt_full_constraints`] on segment s=2).
+unified-strip-lastrow-ntt = []

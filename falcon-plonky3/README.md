@@ -2,7 +2,7 @@
 
 Plonky3 STARK scaffolding for Falcon signature verification (see [`falcon-rust`](../falcon-rust) for the lattice scheme and [`falcon-r1cs`](../falcon-r1cs/src/circuits/falcon_dual_ntt.rs) for the closest R1CS).
 
-## Verifier-facing statement (Tier 1 trust model)
+## Verifier-facing statement
 
 This section is the **single place** that states what the bundle **cryptographically** guarantees vs what the **verifier assumes** by re-running Falcon logic in Rust.
 
@@ -34,7 +34,7 @@ Rows are indexed by NTT coefficient $i = 0 \ldots N-1$ (with $N = 512$ or $1024$
 
 ### Public periodic columns (2 columns, period $N$)
 
-[`FalconDualNttEquationAir`](src/air/dual_ntt_equation.rs) exposes **`pk_ntt[i]`** and **`hm_ntt[i]`** as **periodic** parameters (length-$N$ tables), not as a committed preprocessed trace. Both prover and verifier instantiate the same [`FalconDualNttEquationAir::new`](src/air/dual_ntt_equation.rs) data from `(pk, msg, sig)`; Plonky3’s STARK driver folds periodic data into the Fiat–Shamir transcript (see Plonky3 `uni-stark` prover). That **ties the dual-NTT proof** to those concrete periodic values **for this `Air` instance**—with this repo’s API, the values come from the verifier’s own derivation (see [Verifier-facing statement](#verifier-facing-statement-tier-1-trust-model)). The dual-NTT constraints still **do not** re-prove hash-to-point in-circuit; they use `hm_ntt` as given public data per row.
+[`FalconDualNttEquationAir`](src/air/dual_ntt_equation.rs) exposes **`pk_ntt[i]`** and **`hm_ntt[i]`** as **periodic** parameters (length-$N$ tables), not as a committed preprocessed trace. Both prover and verifier instantiate the same [`FalconDualNttEquationAir::new`](src/air/dual_ntt_equation.rs) data from `(pk, msg, sig)`; Plonky3’s STARK driver folds periodic data into the Fiat–Shamir transcript (see Plonky3 `uni-stark` prover). That **ties the dual-NTT proof** to those concrete periodic values **for this `Air` instance**—with this repo’s API, the values come from the verifier’s own derivation (see [Verifier-facing statement](#verifier-facing-statement)). The dual-NTT constraints still **do not** re-prove hash-to-point in-circuit; they use `hm_ntt` as given public data per row.
 
 ### Preprocessed columns (dual-NTT): 4 columns, height $N$
 
@@ -118,7 +118,7 @@ flowchart LR
 
 ## To tighten (statement binding)
 
-**Tier 1** (explicit statement for integrators) is the [Verifier-facing statement](#verifier-facing-statement-tier-1-trust-model) section above: same `(pk, msg, sig)`, verifier-rebuilt periodic tables, preprocessed references where used, and a clear split between “proved by STARK” vs “assumed because the verifier re-runs Falcon logic in Rust” (including hash-to-point for `hm` / `hm_ntt`).
+The [Verifier-facing statement](#verifier-facing-statement) section above is the explicit contract for integrators: same `(pk, msg, sig)`, verifier-rebuilt periodic tables, preprocessed references where used, and a clear split between “proved by STARK” vs “assumed because the verifier re-runs Falcon logic in Rust” (including hash-to-point for `hm` / `hm_ntt`).
 
 Checklist (optional refinements beyond the current design):
 
@@ -160,7 +160,7 @@ This does **not** by itself connect coefficient limbs to **full NTT** butterfly 
 |-------|------|
 | [`FalconDualNttEquationAir`](src/air/dual_ntt_equation.rs) | Per NTT index $i$: NTT limbs pinned to preprocessed refs; dual-NTT congruence mod $q$ (enumerated below). |
 | [`FalconCoeffDualProductZeroAir`](src/air/coeff_dual_product_zero.rs) | Coefficient domain: expected `sig_pos`/`sig_neg` in preprocessed columns; bits reconstruct and `sig_pos[i]·sig_neg[i]=0`. |
-| [`FalconL2BoundAir`](src/air/l2_bound.rs) | Coefficient domain: centered `m²` sum and `≤ SIG_L2_BOUND`. |
+| [`FalconL2BoundAir`](src/air/l2_bound.rs) | Coefficient domain: each row's coefficient pinned to a preprocessed ref (`sig_pos`/`sig_neg`/`v_pos`/`v_neg`); centered `m²` sum and `≤ SIG_L2_BOUND`. |
 | [`FalconNttLayerAir`](src/air/ntt_layer.rs) | One Cooley–Tukey layer (debug / per-layer tests). |
 | [`FalconNttFullAir`](src/air/ntt_full.rs) | All `LOG_N` layers for one limb in one proof. |
 
@@ -260,6 +260,7 @@ There is no mathematical obstruction to putting NTT, dual-NTT, coeff checks, and
 - **Constraint degree:** the highest degree among all AIR identities (after selectors) drives the **quotient** polynomial degree and hence FRI/PCS work. Stacking NTT butterflies (already multiplicative degree several), per-row dual-NTT identities, bit lookups, and L² accumulation in one constraint set often **raises** that maximum compared to separate AIRs tuned in isolation.
 - **Single trace geometry:** today’s pieces use different natural heights (`N` for the congruence AIR, \((N/2)\cdot LOG_N\) padded for full NTT, `4N` for L², etc.). One matrix means **padding**, **selector columns** to turn constraints off on inactive rows, or a custom layout—each choice affects width, degree, and soundness bookkeeping.
 - **Prover cost:** work scales roughly with trace size (width × height) and with the quotient pipeline derived from degree. A unified trace can be **wider and/or taller** than the sum of minimal separate traces if you are not careful.
+- **Experimental single-STARK:** [`prove_falcon_parsed_verify_single_stark`](src/full_verify.rs) still hits `OodEvaluationMismatch` despite `check_constraints` accepting the witness; investigation log: [`docs/unified_single_stark_ood.md`](docs/unified_single_stark_ood.md).
 
 ### 4. L²: why not “one big field variable” for the running sum?
 
@@ -284,6 +285,22 @@ Dilithium will be implemented in this workspace as well; the bullets below are *
 ### R1CS / Groth16 (`falcon-r1cs`)
 
 Arkworks **R1CS constraint counts** (e.g. `ConstraintSystem::num_constraints()` for `FalconNTTVerificationCircuit`, `FalconDualNTTVerificationCircuit`, schoolbook verify) are documented in [`falcon-r1cs`](../falcon-r1cs/README.md) and in more detail in [`falcon-r1cs/docs/r1cs_constraints.md`](../falcon-r1cs/docs/r1cs_constraints.md). At Falcon-1024, NTT-based verification is on the order of **\(10^5\)** R1CS rows versus **on the order of \(10^6\)** primitive AIR identities for the seven-proof Plonky3 bundle here—the metrics are **not** interchangeable.
+
+## Cross-system timings (`falcon-sig-bench`)
+
+Wall-clock samples from `cargo run -p falcon-sig-bench --release` with `RUSTFLAGS='-C target-cpu=native'` (**single run**, release, Falcon-1024). Numbers vary by CPU and load—**re-run locally** before comparing seriously.
+
+| Backend | Prove (warm) | Verify |
+|---------|----------------|--------|
+| **Plonky3** (`prove_falcon_parsed_verify` / `verify_falcon_parsed_verify`) | ~0.72 s | ~40 ms |
+| **Groth16** (`falcon-r1cs` example path: setup + prove) | setup ~3.6 s + prove ~2.1 s | ~19 ms (pairing; plus ~75 µs to derive public inputs from `(pk, msg, sig)`) |
+| **UltraPlonk + KZG** (`falcon-plonk` + jellyfish; universal SRS + preprocess + prove) | universal setup ~0.40 s + preprocess ~2.8 s + prove ~6.9 s | ~13 ms (KZG; plus ~72 µs derive bindings) |
+
+**Plonky3 verifier:** [`verify_falcon_parsed_verify`](src/full_verify.rs) runs the **seven** STARK checks **in parallel** (`std::thread::scope`). For a **sequential** breakdown (sums to roughly pre-parallel wall time on one core)—useful to see `setup_preprocessed` vs `verify_with_preprocessed` totals—call [`verify_falcon_parsed_verify_with_breakdown`](src/full_verify.rs).
+
+**Would one STARK help?** Fewer proof objects means fewer Fiat–Shamir transcripts and verifier passes in principle, but a **single** AIR that merges dual-NTT, coeff checks, four full NTTs, and L² usually raises **constraint degree**, **quotient** cost, and **trace layout** complexity (padding / selectors). See [To tighten (statement binding)](#to-tighten-statement-binding) and *§ One combined AIR* under [Falcon on Plonky3: concrete challenges (FAQ)](#falcon-on-plonky3-concrete-challenges-faq). It is a trade-off: engineering effort and possibly worse **prover** time, not a free verifier win.
+
+The three backends prove **related but not identical** statements (norm bounds, hash-outside-circuit, seven-proof composition vs one SNARK)—treat this table as workload timing, not cryptographic equivalence.
 
 ## Running tests
 

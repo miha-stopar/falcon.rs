@@ -44,9 +44,22 @@ pub fn build_hash_to_point_instance(
 ) {
     assert!(msg.len() <= HASH_MSG_MAX_BYTES);
     assert_eq!(nonce.len(), 40);
-    let result = hash_to_point(msg, nonce);
-    let air = FalconHashToPointAir::new(msg.len());
-    let main = build_hash_to_point_main(&result);
+    build_hash_to_point_instance_from_result(msg.len(), &hash_to_point(msg, nonce))
+}
+
+/// Same as [`build_hash_to_point_instance`] but reuses an existing [`HashToPointResult`]
+/// (shared with [`super::prove_keccak::prove_shake_keccak`] on the same sponge run).
+pub fn build_hash_to_point_instance_from_result(
+    msg_len: usize,
+    result: &HashToPointResult,
+) -> (
+    FalconHashToPointAir,
+    RowMajorMatrix<KoalaBear>,
+    Vec<KoalaBear>,
+) {
+    assert!(msg_len <= HASH_MSG_MAX_BYTES);
+    let air = FalconHashToPointAir::new(msg_len);
+    let main = build_hash_to_point_main(result);
     let public_values: Vec<KoalaBear> = result
         .hm
         .coeff()

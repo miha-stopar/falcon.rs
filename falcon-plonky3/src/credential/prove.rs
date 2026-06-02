@@ -16,7 +16,7 @@ use crate::credential::keys::FalconCredentialVerifyKeys;
 use crate::credential::public_inputs::FalconCredentialPublicInputs;
 use crate::full_verify::FALCON_STATEMENT_DIGEST_LEN;
 use crate::hash::hash_to_point;
-use crate::hash::witness::build_hash_to_point_instance;
+use crate::hash::witness::build_hash_to_point_instance_from_result;
 use crate::witness::{
     build_falcon_coeff_dual_product_zero_trace, build_falcon_dual_ntt_credential_air,
     build_falcon_dual_ntt_credential_instance, build_falcon_l2_bound_trace,
@@ -61,7 +61,8 @@ macro_rules! impl_credential_prove_verify {
 
             let shake_keccak = $prove_keccak(config, &shake, &digest);
 
-            let (htp_air, htp_main, _) = build_hash_to_point_instance(public.msg, nonce);
+            let (htp_air, htp_main, _) =
+                build_hash_to_point_instance_from_result(public.msg.len(), &shake);
             let htp_air = StatementBoundAir::new(htp_air, FALCON_STATEMENT_DIGEST_LEN);
             let hash_to_point = prove(config, &htp_air, htp_main, &digest);
 

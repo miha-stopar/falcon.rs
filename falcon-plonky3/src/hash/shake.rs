@@ -143,6 +143,11 @@ fn falcon_keccakf(a: &mut [u64; 25]) {
     a[20] = !a[20];
 }
 
+/// Number of Falcon `process_block` calls during `hash_to_point` (length of [`HashToPointResult::keccak_inputs`]).
+pub fn count_keccak_blocks(msg: &[u8], nonce: &[u8]) -> usize {
+    hash_to_point(msg, nonce).keccak_inputs.len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,5 +160,16 @@ mod tests {
         let sim = hash_to_point(msg, &nonce);
         assert_eq!(native, sim.hm);
         assert_eq!(sim.squeeze.len(), SHAKE_SQUEEZE_LEN);
+    }
+
+    #[test]
+    fn keccak_inputs_are_deterministic_and_non_empty() {
+        let msg = b"zk credential presentation";
+        let nonce = [7u8; 40];
+        let a = hash_to_point(msg, &nonce);
+        let b = hash_to_point(msg, &nonce);
+        assert_eq!(a.keccak_inputs, b.keccak_inputs);
+        assert!(!a.keccak_inputs.is_empty());
+        assert_eq!(a.squeeze, b.squeeze);
     }
 }

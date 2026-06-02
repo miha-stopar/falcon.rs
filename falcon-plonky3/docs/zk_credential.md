@@ -102,9 +102,10 @@ Falcon hash-to-point: `SHAKE256(nonce, msg)` → squeeze → rejection sampling 
 | Native squeeze helper | `falcon_rust::shake256_context::hash_to_point_squeeze` |
 | `FalconHashToPointAir` | Rejection sampling + `hm` coeffs via witness `COL_HM_REF` (prove/verify test passes) |
 | `p3_keccak_air` sponge steps | [`prove_shake_keccak`](../src/hash/prove_keccak.rs) + `tests/shake_keccak_prove.rs` |
-| Credential bundle | `shake_keccak` + `hash_to_point` sub-proofs bound to credential digest |
+| Credential bundle | `shake_keccak` + `hash_to_point` share one [`HashToPointResult`](../src/hash/shake.rs) per prove |
+| Sponge ↔ squeeze linkage | Witness coherence tests; **in-circuit** byte linkage Keccak → `COL_B0`/`COL_B1` still open |
 
-Until Phase C is wired, the prover sets `public.hm` from native `Polynomial::from_hash_of_message` (same as today’s verifiers).
+The prover runs [`hash_to_point`](../src/hash/shake.rs) once; [`prove_shake_keccak`](../src/hash/prove_keccak.rs) and [`build_hash_to_point_instance_from_result`](../src/hash/witness.rs) consume the same `squeeze` / `keccak_inputs` ([`tests/hash_witness_coherence.rs`](../tests/hash_witness_coherence.rs)).
 
 ## API sketch
 
@@ -112,7 +113,7 @@ Until Phase C is wired, the prover sets `public.hm` from native `Polynomial::fro
 let keys = FalconCredentialVerifyKeys::setup(&config)?;
 
 let public = FalconCredentialPublicInputs::from_presentation(&issuer_pk, msg, &sig);
-// `public.hm` is the message-hash polynomial (native for now; in-circuit in Phase C).
+// `public.hm` must match hash_to_point (prover checks); hash sub-STARKs use the same sponge witness.
 
 let proof = prove_credential(&config, &keys, &public, &sig)?;
 verify_credential(&config, &keys, &public, &proof)?;

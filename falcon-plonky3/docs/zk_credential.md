@@ -56,8 +56,8 @@ The legacy [`full_verify`](../src/full_verify.rs) path remains for transparent v
 | Phase | Deliverable |
 |-------|-------------|
 | **A (done)** | Universal NTT preprocessed; credential keys + API; credential AIRs without statement preprocessed binding |
-| **B** | ZK-enabled PCS (`HidingFriPcs`); witness hiding |
-| **C (in progress)** | In-circuit SHAKE256 + hash-to-point (`FalconHashToPointAir`, `p3_keccak_air`) |
+| **B (done)** | ZK-enabled PCS ([`stark_config_poseidon2_zk`](../src/config.rs)); witness hiding |
+| **C (in progress)** | In-circuit SHAKE256 + hash-to-point + Keccak-f steps |
 | **D** | Single credential AIR or recursive aggregation (fixed outer VK) |
 | **E** | Policy predicates (range on attributes via lookups, Vega-style) |
 
@@ -89,9 +89,9 @@ The **algebraic constraints** (dual-NTT, L², NTT, etc.) stay the same; only the
 | Prove `hm = H(msg, nonce)` in-circuit | **C** |
 | One proof / one outer VK | **D** |
 
-### Sketch for this repo
+### Implemented in this repo
 
-Add `stark_config_poseidon2_zk()` (KoalaBear + `HidingFriPcs` + Keccak MMCS, mirroring Plonky3 tests) and optionally `prove_credential_zk` using that config. Prover cost increases; verifier gets ZK.
+[`stark_config_poseidon2_zk()`](../src/config.rs) builds `FalconStarkZkConfig` (KoalaBear + `HidingFriPcs` + `MerkleTreeHidingMmcs`, mirroring Plonky3 `periodic_air` ZK tests). Use [`prove_credential_zk`](../src/credential/prove.rs) / [`verify_credential_zk`](../src/credential/prove.rs) with that config (`tests/credential_prove.rs::credential_prove_verify_zk_config`). ZK FRI uses `log_blowup: 3` so the L² credential trace verifies under hiding.
 
 ## Phase C — hash in circuit (in progress)
 
@@ -101,8 +101,8 @@ Falcon hash-to-point: `SHAKE256(nonce, msg)` → squeeze → rejection sampling 
 |-------|--------|
 | Native squeeze helper | `falcon_rust::shake256_context::hash_to_point_squeeze` |
 | `FalconHashToPointAir` | Rejection sampling + `hm` coeffs via witness `COL_HM_REF` (prove/verify test passes) |
-| `p3_keccak_air` sponge steps | Witness recorded; wiring + Falcon `process_block` match WIP |
-| Credential bundle | `hash_to_point` sub-proof bound to credential digest (rejection sampling; `hm` via digest + downstream AIRs) |
+| `p3_keccak_air` sponge steps | [`prove_shake_keccak`](../src/hash/prove_keccak.rs) + `tests/shake_keccak_prove.rs` |
+| Credential bundle | `shake_keccak` + `hash_to_point` sub-proofs bound to credential digest |
 
 Until Phase C is wired, the prover sets `public.hm` from native `Polynomial::from_hash_of_message` (same as today’s verifiers).
 

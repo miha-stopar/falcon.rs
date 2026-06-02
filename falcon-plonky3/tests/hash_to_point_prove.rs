@@ -32,3 +32,16 @@ fn hash_to_point_prove_verify() {
     let proof = prove(&config, &air, main, &pi);
     verify(&config, &air, &proof, &pi).expect("hash_to_point verify");
 }
+
+#[test]
+fn hash_to_point_zk_prove_verify() {
+    use falcon_plonky3::stark_config_poseidon2_zk;
+
+    let msg = b"zk credential presentation";
+    let nonce = [7u8; 40];
+    let (air, main, pi) = build_hash_to_point_instance(msg, &nonce);
+    check_constraints(&air, &main, &pi);
+    let config = stark_config_poseidon2_zk();
+    let proof = prove(&config, &air, main, &pi);
+    verify(&config, &air, &proof, &pi).expect("hash_to_point zk verify");
+}

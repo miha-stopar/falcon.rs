@@ -8,5 +8,9 @@ mod prove;
 mod public_inputs;
 
 pub use keys::FalconCredentialVerifyKeys;
-pub use prove::{prove_credential, verify_credential, FalconCredentialProof};
+pub use crate::config::FalconStarkZkConfig;
+pub use prove::{
+    falcon_credential_verify_digest, prove_credential, prove_credential_zk, verify_credential,
+    verify_credential_zk, CredentialProofBundle, FalconCredentialProof, FalconCredentialZkProof,
+};
 pub use public_inputs::FalconCredentialPublicInputs;

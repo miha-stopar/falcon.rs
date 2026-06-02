@@ -7,5 +7,5 @@ mod prove_keccak;
 mod shake;
 pub mod witness;
 
-pub use prove_keccak::prove_shake_keccak;
+pub use prove_keccak::{prove_shake_keccak, prove_shake_keccak_zk};
 pub use shake::{hash_to_point, HashToPointResult, SHAKE_SQUEEZE_LEN};

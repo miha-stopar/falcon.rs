@@ -1,6 +1,6 @@
 use falcon_plonky3::{
     prove_credential, stark_config_poseidon2, verify_credential, FalconCredentialPublicInputs,
-    FalconCredentialVerifyKeys,
+    FalconCredentialVerifyKeys, FalconStarkConfig,
 };
 use falcon_rust::KeyPair;
 
@@ -14,11 +14,32 @@ fn credential_prove_verify_with_fixed_keys() {
     assert!(keypair.public_key.verify_parsed_sig(msg.as_ref(), &sig));
 
     let config = stark_config_poseidon2();
-    let keys = FalconCredentialVerifyKeys::setup(&config);
+    let keys = FalconCredentialVerifyKeys::<FalconStarkConfig>::setup(&config);
     let public = FalconCredentialPublicInputs::from_presentation(&keypair.public_key, msg, &sig);
 
     let proof = prove_credential(&config, &keys, &public, &sig);
     verify_credential(&config, &keys, &public, &proof).expect("credential verify failed");
+}
+
+#[test]
+fn credential_prove_verify_zk_config() {
+    use falcon_plonky3::{
+        prove_credential_zk, stark_config_poseidon2_zk, verify_credential_zk, FalconStarkZkConfig,
+    };
+
+    let keypair = KeyPair::keygen();
+    let msg = b"zk credential presentation";
+    let sig = keypair
+        .secret_key
+        .sign_with_seed(b"seed-cred-zk", msg.as_ref());
+    assert!(keypair.public_key.verify_parsed_sig(msg.as_ref(), &sig));
+
+    let config = stark_config_poseidon2_zk();
+    let keys = FalconCredentialVerifyKeys::<FalconStarkZkConfig>::setup(&config);
+    let public = FalconCredentialPublicInputs::from_presentation(&keypair.public_key, msg, &sig);
+
+    let proof = prove_credential_zk(&config, &keys, &public, &sig);
+    verify_credential_zk(&config, &keys, &public, &proof).expect("credential zk verify failed");
 }
 
 #[test]
@@ -37,7 +58,7 @@ fn ntt_full_vk_is_reusable_across_polynomials() {
     let poly_b = poly_a.clone();
 
     let config = stark_config_poseidon2();
-    let keys = FalconCredentialVerifyKeys::setup(&config);
+    let keys = FalconCredentialVerifyKeys::<FalconStarkConfig>::setup(&config);
     let digest = [KoalaBear::ZERO; 8];
     let air = StatementBoundAir::new(FalconNttFullAir::new_universal(), FALCON_STATEMENT_DIGEST_LEN);
 

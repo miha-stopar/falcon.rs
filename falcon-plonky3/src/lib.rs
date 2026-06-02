@@ -52,7 +52,9 @@ pub use air::{
     FalconUnifiedParsedVerifyAir, StatementBoundAir, NTT_LAYER_MAIN_COLS,
     NUM_DUAL_NTT_PREPROCESSED_COLS, unified_trace_height,
 };
-pub use config::stark_config_poseidon2;
+pub use config::{
+    stark_config_poseidon2, stark_config_poseidon2_zk, FalconStarkConfig, FalconStarkZkConfig,
+};
 pub use witness::{
     build_falcon_coeff_dual_product_zero_instance,
     build_falcon_coeff_dual_product_zero_preprocessed,
@@ -63,8 +65,9 @@ pub use witness::{
     build_ntt_layer_main_trace,
 };
 pub use credential::{
-    prove_credential, verify_credential, FalconCredentialProof, FalconCredentialPublicInputs,
-    FalconCredentialVerifyKeys,
+    prove_credential, prove_credential_zk, verify_credential, verify_credential_zk,
+    CredentialProofBundle, FalconCredentialProof, FalconCredentialPublicInputs,
+    FalconCredentialVerifyKeys, FalconCredentialZkProof,
 };
 pub use full_verify::{
     falcon_statement_digest, prove_falcon_ntt_layers_only, prove_falcon_parsed_verify,

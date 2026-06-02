@@ -23,6 +23,7 @@ p3-keccak = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec4
 p3-keccak-air = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
 p3-uni-stark = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
 p3-util = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }
+rand = { version = "0.10", default-features = false, features = ["std_rng"] }
 
 [dev-dependencies]
 p3-air = { git = "https://github.com/Plonky3/Plonky3", rev = "3f67d136c71bec40f180c85d0bb2b654acddef22" }

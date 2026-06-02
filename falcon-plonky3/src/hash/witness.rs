@@ -13,7 +13,8 @@ use crate::air::hash_to_point::{
     HASH_MSG_MAX_BYTES,
     NUM_HASH_MAIN_COLS, NUM_HASH_PUBLIC_VALUES, QUOT_BITS, SLACK_BITS,
 };
-use crate::hash::shake::{hash_to_point, HashToPointResult};
+use crate::hash::shake::HashToPointResult;
+use crate::hash::shake::hash_to_point;
 
 fn fe_u32(x: u32) -> KoalaBear {
     <KoalaBear as PrimeCharacteristicRing>::from_u32(x)
@@ -74,7 +75,6 @@ fn build_hash_to_point_main(result: &HashToPointResult) -> RowMajorMatrix<KoalaB
     let mut rows: Vec<Vec<KoalaBear>> = Vec::new();
     let mut ctr = 0usize;
     let mut emit_ctr = 0u32;
-
     while emit_ctr < N as u32 {
         let b0 = result.squeeze[ctr];
         let b1 = result.squeeze[ctr + 1];

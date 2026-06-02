@@ -112,6 +112,5 @@ impl<AB: AirBuilder<F = KoalaBear>> Air<AB> for FalconHashToPointAir {
             .when_last_row()
             .assert_eq(w[COL_EMIT_CTR].clone(), AB::Expr::from_u32(N as u32));
 
-        let _ = self.msg_len;
     }
 }

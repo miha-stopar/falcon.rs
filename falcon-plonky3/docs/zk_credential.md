@@ -103,7 +103,7 @@ Falcon hash-to-point: `SHAKE256(nonce, msg)` → squeeze → rejection sampling 
 | `FalconHashToPointAir` | Rejection sampling + `hm` coeffs via witness `COL_HM_REF` (prove/verify test passes) |
 | `p3_keccak_air` sponge steps | [`prove_shake_keccak`](../src/hash/prove_keccak.rs) + `tests/shake_keccak_prove.rs` |
 | Credential bundle | `shake_keccak` + `hash_to_point` share one [`HashToPointResult`](../src/hash/shake.rs) per prove |
-| Sponge ↔ squeeze linkage | Witness coherence tests; **in-circuit** byte linkage Keccak → `COL_B0`/`COL_B1` still open |
+| Sponge ↔ squeeze linkage | `rate_after_perm` recorded; in-circuit byte link blocked on simulator ≡ C ([`docs/sponge_linkage.md`](sponge_linkage.md)) |
 
 The prover runs [`hash_to_point`](../src/hash/shake.rs) once; [`prove_shake_keccak`](../src/hash/prove_keccak.rs) and [`build_hash_to_point_instance_from_result`](../src/hash/witness.rs) consume the same `squeeze` / `keccak_inputs` ([`tests/hash_witness_coherence.rs`](../tests/hash_witness_coherence.rs)).
 

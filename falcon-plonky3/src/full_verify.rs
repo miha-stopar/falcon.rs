@@ -51,9 +51,7 @@ use p3_uni_stark::{
 };
 use p3_util::log2_strict_usize;
 
-use crate::air::{
-    build_ntt_full_main, build_ntt_full_preprocessed, FalconNttFullAir, StatementBoundAir,
-};
+use crate::air::{build_ntt_full_main, FalconNttFullAir, StatementBoundAir};
 use crate::config::FalconStarkConfig;
 use crate::air::unified_trace_height;
 use crate::witness::{
@@ -180,9 +178,8 @@ pub fn prove_falcon_parsed_verify(
     let v_dual = DualPolynomial::from(&v);
 
     let prove_full_ntt = |poly: &Polynomial| {
-        let prep = build_ntt_full_preprocessed(poly);
         let main = build_ntt_full_main(poly);
-        let air = StatementBoundAir::new(FalconNttFullAir::new(prep.clone()), FALCON_STATEMENT_DIGEST_LEN);
+        let air = StatementBoundAir::new(FalconNttFullAir::new_universal(), FALCON_STATEMENT_DIGEST_LEN);
         let deg = log2_strict_usize(main.height());
         let (pp, vk) = setup_preprocessed(&config, &air, deg).expect("ntt_full setup");
         debug_assert_eq!(pp.degree_bits, deg + config.is_zk());
@@ -349,9 +346,8 @@ fn verify_ntt_full_subproof(
     digest: &[KoalaBear],
 ) -> Result<(), p3_uni_stark::VerificationError<p3_uni_stark::PcsError<FalconStarkConfig>>> {
     let config = stark_config_poseidon2();
-    let prep = build_ntt_full_preprocessed(poly);
     let main = build_ntt_full_main(poly);
-    let air = StatementBoundAir::new(FalconNttFullAir::new(prep), FALCON_STATEMENT_DIGEST_LEN);
+    let air = StatementBoundAir::new(FalconNttFullAir::new_universal(), FALCON_STATEMENT_DIGEST_LEN);
     let deg = log2_strict_usize(main.height());
     let (_, vk) = setup_preprocessed(&config, &air, deg).expect("ntt_full setup");
     verify_with_preprocessed(&config, &air, proof, digest, Some(&vk))
@@ -424,9 +420,8 @@ pub fn verify_falcon_parsed_verify_with_breakdown(
                                stark_crypto_verify: &mut Duration|
      -> Result<(), p3_uni_stark::VerificationError<p3_uni_stark::PcsError<FalconStarkConfig>>> {
         let t0 = Instant::now();
-        let prep = build_ntt_full_preprocessed(poly);
         let main = build_ntt_full_main(poly);
-        let air = StatementBoundAir::new(FalconNttFullAir::new(prep), FALCON_STATEMENT_DIGEST_LEN);
+        let air = StatementBoundAir::new(FalconNttFullAir::new_universal(), FALCON_STATEMENT_DIGEST_LEN);
         let deg = log2_strict_usize(main.height());
         let (_, vk) = setup_preprocessed(&config, &air, deg).expect("ntt_full setup");
         *instance_prep += t0.elapsed();

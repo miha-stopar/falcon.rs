@@ -1,9 +1,18 @@
 //! All **`LOG_N`** Cooley–Tukey layers of Falcon’s forward NTT in **one** padded trace.
 //!
-//! Preprocessed columns fix **`(u, v)`** inputs per butterfly (from the statement polynomial in
-//! clear text — same model as the **periodic** `pk_ntt` / `hm_ntt` inputs in the dual-NTT AIR). The prover shows
-//! correct modular butterfly arithmetic for every real row; padding rows (`active = 0`) force
-//! **main = 0**.
+//! ## Reusable VK (credential / ZK path)
+//!
+//! **Preprocessed** columns are **circuit-fixed**: `active` selector and twiddle `s` from
+//! [`NTT_TABLE`](falcon_rust::NTT_TABLE) only. Commit once via [`build_ntt_full_universal_preprocessed`]
+//! and reuse the same `PreprocessedVerifierKey` for every proof.
+//!
+//! **Main** columns hold the private butterfly inputs `u`, `v_in` and the arithmetic witness
+//! (`v_mul`, quotients, outputs). Padding rows (`active = 0`) force **main = 0**.
+//!
+//! ## Legacy note
+//!
+//! Older code placed `(u_in, v_in)` in preprocessed, which made the PCS commitment
+//! statement-specific. Use the universal preprocessed builder for OpenAC/Vega-style credentials.
 //!
 //! One proof replaces **`LOG_N`** separate [`super::ntt_layer::FalconNttLayerAir`] proofs per
 //! polynomial limb.
@@ -21,9 +30,10 @@ use falcon_rust::{Polynomial, LOG_N, MODULUS, N};
 use super::dual_ntt_equation::QUOT_BITS;
 use super::ntt_layer::{butterfly_j_jht_s, state_before_ntt_layer};
 
-pub const NUM_PREPROCESSED_COLS: usize = 4;
-/// `v_mul`, `quot_vs`, `out0`, `out1` bit groups + `q0`, `q1`.
-pub const NUM_MAIN_COLS: usize = 4 * QUOT_BITS + 2;
+/// Universal preprocessed width: `active`, `twiddle`.
+pub const NUM_PREPROCESSED_COLS: usize = 2;
+/// `u`, `v_in`, `v_mul`, `quot_vs`, `out0`, `out1` bit groups + `q0`, `q1`.
+pub const NUM_MAIN_COLS: usize = 6 * QUOT_BITS + 2;
 
 /// `real_butterflies = (N/2) * LOG_N`; trace height is the next power of two (padding).
 pub fn ntt_full_real_rows() -> usize {
@@ -38,12 +48,12 @@ pub fn ntt_full_trace_height() -> usize {
 pub struct PreprocessedFullRow<F> {
     pub active: F,
     pub twiddle: F,
-    pub u_in: F,
-    pub v_in: F,
 }
 
 #[repr(C)]
 pub struct MainFullRow<F> {
+    pub u_bits: [F; QUOT_BITS],
+    pub v_in_bits: [F; QUOT_BITS],
     pub v_mul_bits: [F; QUOT_BITS],
     pub quot_vs_bits: [F; QUOT_BITS],
     pub out0_bits: [F; QUOT_BITS],
@@ -85,6 +95,11 @@ impl FalconNttFullAir {
         assert_eq!(preprocessed.height(), ntt_full_trace_height());
         Self { preprocessed }
     }
+
+    /// AIR with the **universal** preprocessed trace (same for all polynomials / credentials).
+    pub fn new_universal() -> Self {
+        Self::new(build_ntt_full_universal_preprocessed())
+    }
 }
 
 impl BaseAir<KoalaBear> for FalconNttFullAir {
@@ -123,15 +138,17 @@ fn bits_to_expr<AB: AirBuilder<F = KoalaBear>>(bits: &[AB::Var; QUOT_BITS]) -> A
 }
 
 fn eval_row<AB: AirBuilder<F = KoalaBear>>(builder: &mut AB) {
-    let (active, twiddle, u_in, v_in) = {
+    let (active, twiddle) = {
         let prep_win = builder.preprocessed();
         let prep: &PreprocessedFullRow<AB::Var> = prep_win.current_slice().borrow();
-        (prep.active, prep.twiddle, prep.u_in, prep.v_in)
+        (prep.active, prep.twiddle)
     };
-    let (v_mul_bits, quot_vs_bits, out0_bits, out1_bits, q0, q1) = {
+    let (u_bits, v_in_bits, v_mul_bits, quot_vs_bits, out0_bits, out1_bits, q0, q1) = {
         let main_win = builder.main();
         let m: &MainFullRow<AB::Var> = main_win.current_slice().borrow();
         (
+            m.u_bits,
+            m.v_in_bits,
             m.v_mul_bits,
             m.quot_vs_bits,
             m.out0_bits,
@@ -146,8 +163,10 @@ fn eval_row<AB: AirBuilder<F = KoalaBear>>(builder: &mut AB) {
     let act: AB::Expr = active.into();
     let not_act = one - act.clone();
 
-    for bit in v_mul_bits
+    for bit in u_bits
         .iter()
+        .chain(v_in_bits.iter())
+        .chain(v_mul_bits.iter())
         .chain(quot_vs_bits.iter())
         .chain(out0_bits.iter())
         .chain(out1_bits.iter())
@@ -172,8 +191,8 @@ fn eval_row<AB: AirBuilder<F = KoalaBear>>(builder: &mut AB) {
     let bool_q1 = q1_e.clone() * (q1_e - one_q1);
     builder.assert_zero(act.clone() * bool_q1);
 
-    let u: AB::Expr = u_in.into();
-    let v_in_e: AB::Expr = v_in.into();
+    let u: AB::Expr = bits_to_expr::<AB>(&u_bits);
+    let v_in_e: AB::Expr = bits_to_expr::<AB>(&v_in_bits);
     let v_mul = bits_to_expr::<AB>(&v_mul_bits);
     let quot_vs = bits_to_expr::<AB>(&quot_vs_bits);
     let out0 = bits_to_expr::<AB>(&out0_bits);
@@ -211,8 +230,10 @@ fn quot_to_bits_le(x: u16) -> [u16; QUOT_BITS] {
     bits
 }
 
-/// Build preprocessed trace: `active`, twiddle, inputs `u`,`v` for each butterfly; padding rows inactive.
-pub fn build_ntt_full_preprocessed(poly: &Polynomial) -> RowMajorMatrix<KoalaBear> {
+/// Circuit-fixed preprocessed trace: `active` and twiddle `s` per butterfly row (padding inactive).
+///
+/// Safe to commit once and reuse as `PreprocessedVerifierKey` for every NTT-full proof.
+pub fn build_ntt_full_universal_preprocessed() -> RowMajorMatrix<KoalaBear> {
     let h = ntt_full_trace_height();
     let real = ntt_full_real_rows();
     let mut vals = Vec::with_capacity(h * NUM_PREPROCESSED_COLS);
@@ -220,20 +241,21 @@ pub fn build_ntt_full_preprocessed(poly: &Polynomial) -> RowMajorMatrix<KoalaBea
         if r < real {
             let layer = r / (N / 2);
             let b = r % (N / 2);
-            let st = state_before_ntt_layer(poly, layer);
-            let (j, j2, s) = butterfly_j_jht_s(layer, b);
+            let (_j, _j2, s) = butterfly_j_jht_s(layer, b);
             vals.push(KoalaBear::ONE);
             vals.push(fe_u16(s));
-            vals.push(fe_u16(st[j]));
-            vals.push(fe_u16(st[j2]));
         } else {
-            vals.push(KoalaBear::ZERO);
-            vals.push(KoalaBear::ZERO);
             vals.push(KoalaBear::ZERO);
             vals.push(KoalaBear::ZERO);
         }
     }
     RowMajorMatrix::new(vals, NUM_PREPROCESSED_COLS)
+}
+
+/// Deprecated alias: use [`build_ntt_full_universal_preprocessed`] for VK setup.
+#[deprecated(note = "preprocessed is universal; use build_ntt_full_universal_preprocessed")]
+pub fn build_ntt_full_preprocessed(_poly: &Polynomial) -> RowMajorMatrix<KoalaBear> {
+    build_ntt_full_universal_preprocessed()
 }
 
 /// Main trace for [`FalconNttFullAir`].
@@ -264,6 +286,12 @@ pub fn build_ntt_full_main(poly: &Polynomial) -> RowMajorMatrix<KoalaBear> {
         let q1: u16 = ((u + q - v_mul - out1) / q) as u16;
         debug_assert!(q0 <= 1 && q1 <= 1);
 
+        for bit in quot_to_bits_le(u as u16) {
+            vals.push(fe_u16(bit));
+        }
+        for bit in quot_to_bits_le(v_in as u16) {
+            vals.push(fe_u16(bit));
+        }
         for bit in quot_to_bits_le(v_mul as u16) {
             vals.push(fe_u16(bit));
         }

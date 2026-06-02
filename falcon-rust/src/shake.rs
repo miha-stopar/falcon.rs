@@ -46,6 +46,15 @@ impl shake256_context {
         unsafe { shake256_flip(self as *mut shake256_context) }
     }
 
+    /// SHAKE256 expand for Falcon hash-to-point: `inject(nonce) || inject(msg) || flip || extract`.
+    pub fn hash_to_point_squeeze(message: &[u8], nonce: &[u8], out_len: usize) -> Vec<u8> {
+        let mut ctx = Self::init();
+        ctx.inject(nonce);
+        ctx.inject(message);
+        ctx.finalize();
+        ctx.extract(out_len)
+    }
+
     /// Extract data from the RNG
     pub fn extract(&mut self, len: usize) -> Vec<u8> {
         let data = vec![0u8; len];

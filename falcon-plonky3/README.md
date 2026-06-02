@@ -2,6 +2,16 @@
 
 Plonky3 STARK scaffolding for Falcon signature verification (see [`falcon-rust`](../falcon-rust) for the lattice scheme and [`falcon-r1cs`](../falcon-r1cs/src/circuits/falcon_dual_ntt.rs) for the closest R1CS).
 
+## ZK credentials (OpenAC / Vega style)
+
+For proving possession of a valid issuer signature **without revealing the signature**, use the
+[`credential`](src/credential/mod.rs) API and [`docs/zk_credential.md`](docs/zk_credential.md):
+
+- **Fixed** `FalconCredentialVerifyKeys` (universal NTT preprocessed commitment; setup once per parameter set).
+- **Public:** issuer `pk`, message/policy bytes, `sig_nonce` (for `hm` until hash is in-circuit).
+- **Private:** `Signature` witness in main traces only.
+- Legacy [`full_verify`](src/full_verify.rs) remains for transparent verifier-rebuilt references.
+
 ## Verifier-facing statement
 
 This section is the **single place** that states what the bundle **cryptographically** guarantees vs what the **verifier assumes** by re-running Falcon logic in Rust.

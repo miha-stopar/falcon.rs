@@ -115,8 +115,23 @@ pub(crate) fn falcon_l2_contrib<AB: AirBuilder<F = KoalaBear>>(cur: &MainRow<AB:
     m_expr.clone() * m_expr
 }
 
+/// Per-row constraints without statement binding (credential / private-witness path).
+pub(crate) fn eval_common_credential<AB: AirBuilder<F = KoalaBear>>(builder: &mut AB) {
+    eval_common_base(builder);
+}
+
 /// Per-row constraints (no `next` row): boolean decomposition, `e + delta_q = q - 1`, slack split.
 fn eval_common_shared<AB: AirBuilder<F = KoalaBear>>(builder: &mut AB) {
+    eval_common_base(builder);
+
+    let main_win = builder.main();
+    let cur: &MainRow<AB::Var> = main_win.current_slice().borrow();
+    let coeff_ref = builder.preprocessed().current_slice()[0];
+    let e = bits_to_expr::<AB>(&cur.coeff_bits);
+    builder.assert_zero(e - coeff_ref.into());
+}
+
+fn eval_common_base<AB: AirBuilder<F = KoalaBear>>(builder: &mut AB) {
     let main_win = builder.main();
     let cur: &MainRow<AB::Var> = main_win.current_slice().borrow();
 
@@ -127,13 +142,7 @@ fn eval_common_shared<AB: AirBuilder<F = KoalaBear>>(builder: &mut AB) {
     builder.assert_bools(cur.accum_bits);
     builder.assert_bools(cur.bound_diff_bits);
 
-    // Bind the reconstructed coefficient `e` to the verifier-rebuilt reference (preprocessed),
-    // so the squared-norm accumulation is over the *actual* `sig`/`v` coefficients.
-    let coeff_ref = builder.preprocessed().current_slice()[0];
-
     let e = bits_to_expr::<AB>(&cur.coeff_bits);
-    builder.assert_zero(e.clone() - coeff_ref.into());
-
     let delta_q = bits_to_expr::<AB>(&cur.delta_q_bits);
     let qm1: AB::Expr = KoalaBear::from_u32(Q_MINUS_1_U32).into();
     builder.assert_zero(e.clone() + delta_q - qm1);
@@ -149,7 +158,7 @@ fn eval_common_shared<AB: AirBuilder<F = KoalaBear>>(builder: &mut AB) {
     builder.assert_zero(branch_lo + branch_hi);
 }
 
-fn eval_first_accum_only<AB: AirBuilder<F = KoalaBear>>(b: &mut FilteredAirBuilder<'_, AB>) {
+pub(crate) fn eval_first_accum_only<AB: AirBuilder<F = KoalaBear>>(b: &mut FilteredAirBuilder<'_, AB>) {
     let main_win = b.main();
     let cur: &MainRow<AB::Var> = main_win.current_slice().borrow();
     let accum = bits_to_expr::<AB>(&cur.accum_bits);
@@ -159,7 +168,7 @@ fn eval_first_accum_only<AB: AirBuilder<F = KoalaBear>>(b: &mut FilteredAirBuild
     b.assert_zero(diff);
 }
 
-fn eval_mid_transition<AB: AirBuilder<F = KoalaBear>>(b: &mut FilteredAirBuilder<'_, AB>) {
+pub(crate) fn eval_mid_transition<AB: AirBuilder<F = KoalaBear>>(b: &mut FilteredAirBuilder<'_, AB>) {
     let main_win = b.main();
     let cur: &MainRow<AB::Var> = main_win.current_slice().borrow();
     let next: &MainRow<AB::Var> = main_win.next_slice().borrow();
@@ -173,7 +182,7 @@ fn eval_mid_transition<AB: AirBuilder<F = KoalaBear>>(b: &mut FilteredAirBuilder
     b.assert_zero(cur_diff);
 }
 
-fn eval_last_bound_only<AB: AirBuilder<F = KoalaBear>>(b: &mut FilteredAirBuilder<'_, AB>) {
+pub(crate) fn eval_last_bound_only<AB: AirBuilder<F = KoalaBear>>(b: &mut FilteredAirBuilder<'_, AB>) {
     let main_win = b.main();
     let cur: &MainRow<AB::Var> = main_win.current_slice().borrow();
     let accum = bits_to_expr::<AB>(&cur.accum_bits);

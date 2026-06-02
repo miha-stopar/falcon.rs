@@ -41,7 +41,9 @@
 
 pub mod air;
 pub mod config;
+pub mod credential;
 pub mod full_verify;
+pub mod hash;
 pub mod witness;
 
 pub use air::{
@@ -59,6 +61,10 @@ pub use witness::{
     build_falcon_unified_parsed_verify_air,
     build_falcon_unified_parsed_verify_instance, build_ntt_layer0_trace, build_ntt_layer_instance,
     build_ntt_layer_main_trace,
+};
+pub use credential::{
+    prove_credential, verify_credential, FalconCredentialProof, FalconCredentialPublicInputs,
+    FalconCredentialVerifyKeys,
 };
 pub use full_verify::{
     falcon_statement_digest, prove_falcon_ntt_layers_only, prove_falcon_parsed_verify,

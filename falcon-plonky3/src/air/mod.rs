@@ -1,5 +1,7 @@
 mod coeff_dual_product_zero;
+mod credential;
 mod dual_ntt_equation;
+pub mod hash_to_point;
 mod l2_bound;
 mod ntt_full;
 mod ntt_layer;
@@ -24,7 +26,14 @@ pub use ntt_full::{
     NUM_PREPROCESSED_COLS as NTT_FULL_PREPROCESSED_COLS,
     ntt_full_real_rows, ntt_full_trace_height,
 };
+pub use credential::{
+    FalconCoeffDualCredentialAir, FalconDualNttCredentialAir, FalconL2CredentialAir,
+};
+pub use hash_to_point::{
+    FalconHashToPointAir, HASH_MSG_MAX_BYTES, NUM_HASH_MAIN_COLS, NUM_HASH_PUBLIC_VALUES,
+};
 pub use statement_bound::StatementBoundAir;
+pub use ntt_full::build_ntt_full_universal_preprocessed;
 pub use unified_parsed_verify::{
     FalconUnifiedParsedVerifyAir, unified_body_rows, unified_trace_height,
 };

@@ -12,4 +12,5 @@ mod structs;
 pub use arith::*;
 use binder::*;
 pub use param::*;
+pub use shake::shake256_context;
 pub use structs::*;

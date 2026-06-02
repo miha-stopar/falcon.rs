@@ -346,8 +346,6 @@ fn eval_ntt_full_constraints<AB: AirBuilder<F = KoalaBear>>(b: &mut FilteredAirB
     let prep_ntt: &NttPrepRow<AB::Var> = prep_full[UNIFIED_NTT_PREP_OFF..][..NTT_PREP_COLS].borrow();
     let active = prep_ntt.active;
     let twiddle = prep_ntt.twiddle;
-    let u_in = prep_ntt.u_in;
-    let v_in = prep_ntt.v_in;
 
     let main_win = b.main();
     let m: &NttMainRow<AB::Var> = main_win.current_slice()[..NTT_MAIN_COLS].borrow();
@@ -359,8 +357,10 @@ fn eval_ntt_full_constraints<AB: AirBuilder<F = KoalaBear>>(b: &mut FilteredAirB
     let not_act = one.clone() - act.clone();
 
     for bit in m
-        .v_mul_bits
+        .u_bits
         .iter()
+        .chain(m.v_in_bits.iter())
+        .chain(m.v_mul_bits.iter())
         .chain(m.quot_vs_bits.iter())
         .chain(m.out0_bits.iter())
         .chain(m.out1_bits.iter())
@@ -384,8 +384,16 @@ fn eval_ntt_full_constraints<AB: AirBuilder<F = KoalaBear>>(b: &mut FilteredAirB
     let bool_q1 = q1_e.clone() * (q1_e.clone() - one_bit);
     b.assert_zero(act.clone() * bool_q1);
 
-    let u: AB::Expr = u_in.into();
-    let v_in_e: AB::Expr = v_in.into();
+    let mut u: AB::Expr = KoalaBear::ZERO.into();
+    for i in 0..QUOT_BITS {
+        let coeff = KoalaBear::from_u32(1u32 << i);
+        u = u + m.u_bits[i].into() * coeff;
+    }
+    let mut v_in_e: AB::Expr = KoalaBear::ZERO.into();
+    for i in 0..QUOT_BITS {
+        let coeff = KoalaBear::from_u32(1u32 << i);
+        v_in_e = v_in_e + m.v_in_bits[i].into() * coeff;
+    }
 
     let mut v_mul: AB::Expr = KoalaBear::ZERO.into();
     for i in 0..QUOT_BITS {

@@ -960,6 +960,8 @@ dependencies = [
  "p3-dft",
  "p3-field",
  "p3-fri",
+ "p3-keccak",
+ "p3-keccak-air",
  "p3-koala-bear",
  "p3-matrix",
  "p3-merkle-tree",
@@ -1657,6 +1659,30 @@ dependencies = [
  "serde",
  "spin",
  "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "p3-keccak"
+version = "0.5.1"
+source = "git+https://github.com/Plonky3/Plonky3?rev=3f67d136c71bec40f180c85d0bb2b654acddef22#3f67d136c71bec40f180c85d0bb2b654acddef22"
+dependencies = [
+ "p3-symmetric",
+ "p3-util",
+ "tiny-keccak",
+]
+
+[[package]]
+name = "p3-keccak-air"
+version = "0.5.1"
+source = "git+https://github.com/Plonky3/Plonky3?rev=3f67d136c71bec40f180c85d0bb2b654acddef22#3f67d136c71bec40f180c85d0bb2b654acddef22"
+dependencies = [
+ "p3-air",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-util",
+ "rand 0.10.1",
  "tracing",
 ]
 
@@ -2520,6 +2546,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "tiny-keccak"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c9d3793400a45f954c52e73d068316d76b6f4e36977e3fcebb13a2721e80237"
+dependencies = [
+ "crunchy",
 ]
 
 [[package]]

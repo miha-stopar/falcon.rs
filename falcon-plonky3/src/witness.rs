@@ -8,7 +8,8 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_matrix::Matrix;
 
 use crate::air::{
-    build_ntt_full_main, build_ntt_full_preprocessed, butterfly_j_jht_s, state_before_ntt_layer,
+    build_ntt_full_main, build_ntt_full_universal_preprocessed, butterfly_j_jht_s,
+    state_before_ntt_layer,
     unified_parsed_verify::{
         FalconUnifiedParsedVerifyAir, UNIFIED_COEFF_MAIN_OFF, UNIFIED_COEFF_PREP_OFF,
         UNIFIED_DUAL_PREP_OFF, UNIFIED_MAIN_WIDTH, UNIFIED_NTT_PREP_OFF, UNIFIED_PKHM_EMB_OFF,
@@ -19,6 +20,7 @@ use crate::air::{
     NTT_FULL_PREPROCESSED_COLS, NUM_MAIN_COLS, NUM_DUAL_NTT_PREPROCESSED_COLS, NTT_LAYER_MAIN_COLS,
     QUOT_BITS, SLACK_BITS, ntt_full_trace_height,
 };
+use crate::air::FalconDualNttCredentialAir;
 use crate::{FalconCoeffDualProductZeroAir, FalconDualNttEquationAir};
 
 fn fe_u16(x: u16) -> KoalaBear {
@@ -137,6 +139,31 @@ pub fn build_falcon_dual_ntt_instance(
     let main = RowMajorMatrix::new(main_vals, NUM_MAIN_COLS);
     let ntt_ref = RowMajorMatrix::new(ntt_ref_vals, NUM_DUAL_NTT_PREPROCESSED_COLS);
     let air = FalconDualNttEquationAir::new(pk_ntt_vals, hm_ntt_vals, ntt_ref);
+    (air, main)
+}
+
+/// Periodic `pk_ntt` / `hm_ntt` from public issuer key and message-hash polynomial `hm`.
+pub fn build_falcon_dual_ntt_credential_air(
+    issuer_pk: &PublicKey,
+    hm: &Polynomial,
+) -> FalconDualNttCredentialAir {
+    let pk_poly: Polynomial = issuer_pk.into();
+    let pk_ntt = NTTPolynomial::from(&pk_poly);
+    let hm_ntt = NTTPolynomial::from(hm);
+    let pk_ntt_vals: Vec<KoalaBear> = pk_ntt.coeff().iter().map(|&c| fe_u16(c)).collect();
+    let hm_ntt_vals: Vec<KoalaBear> = hm_ntt.coeff().iter().map(|&c| fe_u16(c)).collect();
+    FalconDualNttCredentialAir::new(pk_ntt_vals, hm_ntt_vals)
+}
+
+/// Credential dual-NTT: public periodic columns + **private** main trace from `sig`.
+pub fn build_falcon_dual_ntt_credential_instance(
+    issuer_pk: &PublicKey,
+    msg: &[u8],
+    sig: &Signature,
+) -> (FalconDualNttCredentialAir, RowMajorMatrix<KoalaBear>) {
+    let hm = Polynomial::from_hash_of_message(msg, sig.nonce());
+    let air = build_falcon_dual_ntt_credential_air(issuer_pk, &hm);
+    let (_legacy_air, main) = build_falcon_dual_ntt_instance(issuer_pk, msg, sig);
     (air, main)
 }
 
@@ -300,10 +327,7 @@ pub fn build_falcon_unified_parsed_verify_air(
     let v = hm - uh_pos + uh_neg;
     let v_dual = DualPolynomial::from(&v);
 
-    let prep_sig_pos = build_ntt_full_preprocessed(&sig_poly.pos);
-    let prep_sig_neg = build_ntt_full_preprocessed(&sig_poly.neg);
-    let prep_v_pos = build_ntt_full_preprocessed(&v_dual.pos);
-    let prep_v_neg = build_ntt_full_preprocessed(&v_dual.neg);
+    let prep_ntt_universal = build_ntt_full_universal_preprocessed();
 
     let height = unified_trace_height();
     let preprocessed = assemble_unified_preprocessed_rows(
@@ -312,7 +336,7 @@ pub fn build_falcon_unified_parsed_verify_air(
         dual_air.hm_ntt_values(),
         dual_air.ntt_ref(),
         &coeff_prep,
-        [&prep_sig_pos, &prep_sig_neg, &prep_v_pos, &prep_v_neg],
+        [&prep_ntt_universal, &prep_ntt_universal, &prep_ntt_universal, &prep_ntt_universal],
     );
     FalconUnifiedParsedVerifyAir::new(preprocessed)
 }
@@ -336,10 +360,7 @@ pub fn build_falcon_unified_parsed_verify_instance(
     let v = hm - uh_pos + uh_neg;
     let v_dual = DualPolynomial::from(&v);
 
-    let prep_sig_pos = build_ntt_full_preprocessed(&sig_poly.pos);
-    let prep_sig_neg = build_ntt_full_preprocessed(&sig_poly.neg);
-    let prep_v_pos = build_ntt_full_preprocessed(&v_dual.pos);
-    let prep_v_neg = build_ntt_full_preprocessed(&v_dual.neg);
+    let prep_ntt_universal = build_ntt_full_universal_preprocessed();
 
     let main_sig_pos = build_ntt_full_main(&sig_poly.pos);
     let main_sig_neg = build_ntt_full_main(&sig_poly.neg);
@@ -353,7 +374,7 @@ pub fn build_falcon_unified_parsed_verify_instance(
         dual_air.hm_ntt_values(),
         dual_air.ntt_ref(),
         &coeff_prep,
-        [&prep_sig_pos, &prep_sig_neg, &prep_v_pos, &prep_v_neg],
+        [&prep_ntt_universal, &prep_ntt_universal, &prep_ntt_universal, &prep_ntt_universal],
     );
     let main = assemble_unified_main_rows(
         height,
